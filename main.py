@@ -23,7 +23,7 @@ import json
 class SMBBrowserApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("云铠 SMB 浏览器 1.1")
+        self.root.title("云铠智能办公 SMB 浏览器 1.1")
         self.root.geometry("800x600")
         
         # Style
@@ -71,7 +71,7 @@ class SMBBrowserApp:
 
         # Title
         tk.Label(container, text="云铠 SMB 浏览器", font=("Helvetica", 18, "bold"), bg='white', fg='#333333').pack(pady=(10, 5))
-        tk.Label(container, text="v1.1", font=("Helvetica", 12), bg='white', fg='#888888').pack(pady=(0, 20))
+        tk.Label(container, text="v1.2", font=("Helvetica", 12), bg='white', fg='#888888').pack(pady=(0, 20))
         
         # Info card
         info_frame = tk.Frame(container, bg='#f5f5f5', padx=15, pady=10) # Light gray bg for info
@@ -191,8 +191,19 @@ class SMBBrowserApp:
         self.status_var = tk.StringVar(value="就绪")
         ttk.Label(bottom_frame, textvariable=self.status_var).pack(side=tk.LEFT)
         
-        self.download_btn = ttk.Button(bottom_frame, text="下载选中文件", state=tk.DISABLED, command=self.download_file)
-        self.download_btn.pack(side=tk.RIGHT)
+        # Actions Selection
+        # Actions Selection
+        action_frame = ttk.Frame(bottom_frame)
+        action_frame.pack(side=tk.RIGHT)
+
+        self.btn_delete = ttk.Button(action_frame, text="仅删除", state=tk.DISABLED, command=lambda: self.execute_action("仅删除"))
+        self.btn_delete.pack(side=tk.LEFT, padx=5)
+        
+        self.btn_download = ttk.Button(action_frame, text="仅下载", state=tk.DISABLED, command=lambda: self.execute_action("仅下载"))
+        self.btn_download.pack(side=tk.LEFT, padx=5)
+
+        self.btn_down_del = ttk.Button(action_frame, text="下载并删除", state=tk.DISABLED, command=lambda: self.execute_action("下载并删除"))
+        self.btn_down_del.pack(side=tk.LEFT, padx=5)
 
     def load_config(self):
         try:
@@ -341,7 +352,9 @@ class SMBBrowserApp:
         self.current_path = ""
         self.path_label.config(text=f"\\\\{self.server_ip.get()}")
         self.back_btn.config(state=tk.DISABLED)
-        self.download_btn.config(state=tk.DISABLED)
+        self.btn_delete.config(state=tk.DISABLED)
+        self.btn_download.config(state=tk.DISABLED)
+        self.btn_down_del.config(state=tk.DISABLED)
         
         # Clear tree
         for item in self.tree.get_children():
@@ -435,7 +448,9 @@ class SMBBrowserApp:
         self.path_label.config(text=display_path)
         
         self.back_btn.config(state=tk.NORMAL)
-        self.download_btn.config(state=tk.NORMAL)
+        self.btn_delete.config(state=tk.NORMAL)
+        self.btn_download.config(state=tk.NORMAL)
+        self.btn_down_del.config(state=tk.NORMAL)
         
         for item in self.tree.get_children():
             self.tree.delete(item)
@@ -475,47 +490,86 @@ class SMBBrowserApp:
         except Exception as e:
              self.show_error("连接错误", str(e))
 
-    def download_file(self):
+    def execute_action(self, mode):
         selected_items = self.tree.selection()
         if not selected_items:
             return
 
+        # mode passed as argument
+        
         # 收集所有选中的文件（忽略文件夹）
-        files_to_download = []
+        files_to_process = []
         has_folder = False
         for iid in selected_items:
             item = self.tree.item(iid)
-            # values 是一个列表，第二个元素是类型
             if item['values'][1] == "文件夹":
                 has_folder = True
             else:
-                files_to_download.append(item['text'])
+                files_to_process.append(item['text'])
         
-        if not files_to_download:
+        if not files_to_process:
             msg = "未选择文件。"
             if has_folder:
-                msg += " (不支持下载文件夹)"
+                msg += " (不支持对文件夹执行此操作)"
             messagebox.showinfo("提示", msg)
             return
 
-        # 如果只包含一个文件，行为和以前一样（可以选择保存名）
-        if len(files_to_download) == 1:
-            filename = files_to_download[0]
+        # 仅删除模式
+        if mode == "仅删除":
+            if not messagebox.askyesno("确认删除", f"确定要永久删除选中的 {len(files_to_process)} 个文件吗？\n此操作不可恢复！"):
+                return
+            threading.Thread(target=self.perform_delete_only, args=(files_to_process,), daemon=True).start()
+            return
+
+        # 下载模式 (仅下载 或 下载并删除)
+        delete_after = (mode == "下载并删除")
+        
+        if has_folder:
+             if not messagebox.askyesno("提示", "选中的项目中包含文件夹，文件夹将被忽略。是否继续操作其余文件？"):
+                return
+
+        # 如果只包含一个文件
+        if len(files_to_process) == 1:
+            filename = files_to_process[0]
             save_path = filedialog.asksaveasfilename(initialfile=filename)
             if save_path:
-                threading.Thread(target=self.perform_download_single, args=(filename, save_path), daemon=True).start()
+                threading.Thread(target=self.perform_download_single, args=(filename, save_path, delete_after), daemon=True).start()
         else:
-            # 如果包含多个文件，选择目录批量下载
-            if has_folder:
-                # 提示用户只有文件会被下载
-                if not messagebox.askyesno("提示", "选中的项目中包含文件夹，文件夹将被忽略。是否继续下载其余文件？"):
-                    return
-            
+            # 批量操作
             target_dir = filedialog.askdirectory()
             if target_dir:
-                threading.Thread(target=self.perform_download_batch, args=(files_to_download, target_dir), daemon=True).start()
+                 threading.Thread(target=self.perform_download_batch, args=(files_to_process, target_dir, delete_after), daemon=True).start()
 
-    def perform_download_single(self, filename, save_path):
+    def perform_delete_only(self, files):
+        success_count = 0
+        total = len(files)
+        errors = []
+
+        for index, filename in enumerate(files, 1):
+            try:
+                self.update_status(f"正在删除 ({index}/{total}): {filename}...")
+                path_to_file = filename
+                if self.current_path:
+                    path_to_file = f"{self.current_path}/{filename}"
+                
+                self.conn.deleteFiles(self.current_share, path_to_file)
+                success_count += 1
+            except Exception as e:
+                errors.append(f"{filename}: {str(e)}")
+        
+        self.update_status(f"删除完成。成功: {success_count}/{total}")
+        
+        # Refresh list if any success
+        if success_count > 0:
+            self.list_files()
+            
+        if errors:
+            report = f"删除完成。\n成功: {success_count}\n失败: {len(errors)}\n\n错误详情:\n" + "\n".join(errors[:5])
+            self.root.after(0, lambda: messagebox.showwarning("删除报告", report))
+        else:
+             self.root.after(0, lambda: messagebox.showinfo("成功", f"成功删除 {success_count} 个文件。"))
+
+    def perform_download_single(self, filename, save_path, delete_after):
         try:
             self.update_status(f"正在下载 {filename}...")
             path_to_file = filename
@@ -525,46 +579,63 @@ class SMBBrowserApp:
             with open(save_path, 'wb') as f:
                 self.conn.retrieveFile(self.current_share, path_to_file, f)
             
-            self.update_status(f"已下载 {filename}")
-            self.root.after(0, lambda: messagebox.showinfo("成功", f"文件已下载: {filename}"))
+            msg = f"文件已下载: {filename}"
+            if delete_after:
+                self.update_status(f"下载收完成，正在删除 {filename}...")
+                self.conn.deleteFiles(self.current_share, path_to_file)
+                msg += "\n并已成功从服务器删除。"
+                # Refresh file list
+                self.list_files()
+            
+            self.update_status(f"处理完成: {filename}")
+            self.root.after(0, lambda: messagebox.showinfo("成功", msg))
         except Exception as e:
-            self.show_error("下载错误", str(e))
-            self.update_status("下载失败")
+            self.show_error("操作错误", str(e))
+            self.update_status("操作失败")
 
-    def perform_download_batch(self, files, target_dir):
+    def perform_download_batch(self, files, target_dir, delete_after):
         success_count = 0
         total = len(files)
         errors = []
 
         for index, filename in enumerate(files, 1):
             try:
-                self.update_status(f"正在下载 ({index}/{total}): {filename}...")
+                self.update_status(f"正在处理 ({index}/{total}): {filename}...")
                 path_to_file = filename
                 if self.current_path:
                     path_to_file = f"{self.current_path}/{filename}"
                 
                 save_path = os.path.join(target_dir, filename)
                 
+                # Download
                 with open(save_path, 'wb') as f:
                     self.conn.retrieveFile(self.current_share, path_to_file, f)
+                
+                # Delete if requested, ONLY after successful download
+                if delete_after:
+                    self.conn.deleteFiles(self.current_share, path_to_file)
                 
                 success_count += 1
             except Exception as e:
                 errors.append(f"{filename}: {str(e)}")
-                print(f"Error downloading {filename}: {e}")
+                # If download failed, we do NOT delete.
+                # If delete failed, we count it as error or partial success? 
+                # For simplicity, exception catches both. If delete fails, it's an error.
 
-        # 最终状态
-        status_msg = f"批量下载完成。成功: {success_count}/{total}"
+        status_msg = f"批量处理完成。成功: {success_count}/{total}"
         if errors:
              status_msg += f" 失败: {len(errors)}"
         
         self.update_status(status_msg)
         
-        report = f"下载完成。\n成功: {success_count}\n失败: {len(errors)}"
+        if success_count > 0 and delete_after:
+            self.list_files()
+
+        report = f"处理完成。\n成功: {success_count}\n失败: {len(errors)}"
         if errors:
             report += "\n\n错误详情 (前5个):\n" + "\n".join(errors[:5])
         
-        self.root.after(0, lambda: messagebox.showinfo("下载报告", report))
+        self.root.after(0, lambda: messagebox.showinfo("报告", report))
 
 if __name__ == "__main__":
     root = tk.Tk()
