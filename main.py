@@ -281,8 +281,8 @@ class SMBBrowserApp:
         client_name = socket.gethostname()
         
         # Try to resolve NetBIOS name once
-        # Try to resolve NetBIOS name once
-        remote_name = "*SMBSERVER"
+        # Prepare list of remote names to try
+        remote_names = []
         try:
             # Use the resolved IP for NetBIOS query
             self.update_status(f"正在解析 NetBIOS 名称 {real_ip}...")
@@ -290,9 +290,13 @@ class SMBBrowserApp:
             resolved = nb.queryIPForName(real_ip, port=137, timeout=2)
             nb.close()
             if resolved:
-                remote_name = resolved[0]
+                remote_names.append(resolved[0])
         except:
-            pass # Ignore resolution errors, use *SMBSERVER
+            pass 
+        
+        # Always add fallback *SMBSERVER if not already present
+        if "*SMBSERVER" not in remote_names:
+            remote_names.append("*SMBSERVER")
 
         # Ensure client_name is valid for NetBIOS (max 15 chars)
         if not client_name:
@@ -306,33 +310,40 @@ class SMBBrowserApp:
         errors = {}
 
         for port in ports_to_try:
-            try:
-                self.update_status(f"正在尝试连接 {real_ip}:{port}...")
-                
-                is_direct = (port == 445)
-                self.conn = SMBConnection(
-                    user, 
-                    password, 
-                    client_name, 
-                    remote_name, 
-                    use_ntlm_v2=True,
-                    sign_options=2,
-                    is_direct_tcp=is_direct
-                )
-                
-                if self.conn.connect(real_ip, port, timeout=5):
-                    success = True
-                    self.update_status(f"已连接到 {real_ip} 端口 {port}")
+            port_success = False
+            for r_name in remote_names:
+                try:
+                    self.update_status(f"正在尝试连接 {real_ip}:{port} (Name: {r_name})...")
                     
-                    # Update the UI port to show what actually worked
-                    self.root.after(0, lambda p=port: self.port.set(str(p)))
-                    break
-                else:
-                    errors[port] = "认证失败"
-            except Exception as e:
-                errors[port] = str(e)
-                print(f"Failed on port {port}: {e}")
-                self.conn = None
+                    is_direct = (port == 445)
+                    self.conn = SMBConnection(
+                        user, 
+                        password, 
+                        client_name, 
+                        r_name, 
+                        use_ntlm_v2=True,
+                        sign_options=2,
+                        is_direct_tcp=is_direct
+                    )
+                    
+                    if self.conn.connect(real_ip, port, timeout=5):
+                        success = True
+                        port_success = True
+                        self.update_status(f"已连接到 {real_ip} 端口 {port}")
+                        
+                        # Update the UI port to show what actually worked
+                        self.root.after(0, lambda p=port: self.port.set(str(p)))
+                        break # Break remote_names loop
+                    else:
+                        # Don't record error yet, try next name
+                         errors[f"{port}-{r_name}"] = "认证失败"
+                except Exception as e:
+                    errors[f"{port}-{r_name}"] = str(e)
+                    print(f"Failed on port {port} name {r_name}: {e}")
+                    self.conn = None
+            
+            if port_success:
+                break # Break ports loop
         
         if success:
             # Save successful connection details
