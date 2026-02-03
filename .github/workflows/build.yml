@@ -24,8 +24,9 @@ jobs:
         pip install pyinstaller
 
     - name: Build with PyInstaller
+      shell: cmd
       run: |
-        pyinstaller --onefile --windowed --name "SMB_Browser" --add-data "wechat_qr.png;." main.py
+        pyinstaller --onefile --windowed --name "SMB_Browser" --hidden-import=smb --hidden-import=nmb --add-data "wechat_qr.png;." main.py
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
