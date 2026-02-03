@@ -23,7 +23,7 @@ import json
 class SMBBrowserApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("云铠智能办公 SMB 浏览器 1.1")
+        self.root.title("云铠智能办公 SMB 浏览器 1.2")
         self.root.geometry("800x600")
         
         # Style
@@ -281,6 +281,7 @@ class SMBBrowserApp:
         client_name = socket.gethostname()
         
         # Try to resolve NetBIOS name once
+        # Try to resolve NetBIOS name once
         remote_name = "*SMBSERVER"
         try:
             # Use the resolved IP for NetBIOS query
@@ -293,8 +294,16 @@ class SMBBrowserApp:
         except:
             pass # Ignore resolution errors, use *SMBSERVER
 
+        # Ensure client_name is valid for NetBIOS (max 15 chars)
+        if not client_name:
+            client_name = "SMBClient"
+        # Take first part of FQDN and truncate
+        client_name = client_name.split('.')[0]
+        if len(client_name) > 15:
+            client_name = client_name[:15]
+            
         success = False
-        last_error = None
+        errors = {}
 
         for port in ports_to_try:
             try:
@@ -319,9 +328,9 @@ class SMBBrowserApp:
                     self.root.after(0, lambda p=port: self.port.set(str(p)))
                     break
                 else:
-                    last_error = "认证失败"
+                    errors[port] = "认证失败"
             except Exception as e:
-                last_error = str(e)
+                errors[port] = str(e)
                 print(f"Failed on port {port}: {e}")
                 self.conn = None
         
@@ -340,8 +349,9 @@ class SMBBrowserApp:
                 self.show_error("列出共享错误", str(e))
                 self.update_status("已连接 (获取列表失败)")
         else:
-            msg = last_error if last_error else "连接失败"
-            self.show_error("连接错误", f"无法连接到 {real_ip}.\n已尝试端口: {ports_to_try}\n错误: {msg}")
+            # Construct a detailed error message
+            error_details = "\n".join([f"端口 {p}: {e}" for p, e in errors.items()])
+            self.show_error("连接错误", f"无法连接到 {real_ip}.\n\n错误详情:\n{error_details}")
             self.update_status("连接失败")
             self.conn = None
         
