@@ -26,10 +26,10 @@ jobs:
     - name: Build with PyInstaller
       shell: cmd
       run: |
-        pyinstaller SMB_Browser.spec
+        pyinstaller --onefile --windowed --add-data "wechat_qr.png;." --name "CloudArmor_SMB_Browser" --hidden-import=smb --hidden-import=nmb main.py
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: SMB_Browser_EXE
-        path: dist/SMB_Browser.exe
+        name: CloudArmor_SMB_Browser_EXE
+        path: dist/CloudArmor_SMB_Browser.exe

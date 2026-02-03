@@ -413,7 +413,8 @@ class SMBBrowserApp:
         # Update breadcrumb
         display_path = f"\\\\{self.server_ip.get()}\\{self.current_share}"
         if self.current_path:
-             display_path += f"\\{self.current_path.replace('/', '\\')}"
+             path_backslashes = self.current_path.replace('/', '\\')
+             display_path += f"\\{path_backslashes}"
         self.path_label.config(text=display_path)
         
         self.back_btn.config(state=tk.NORMAL)
