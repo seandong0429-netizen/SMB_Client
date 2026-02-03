@@ -132,7 +132,7 @@ class SMBBrowserApp:
         top_frame.pack(fill=tk.X)
         
         # Grid layout for top frame
-        ttk.Label(top_frame, text="服务器IP:").grid(row=0, column=0, padx=5, sticky=tk.W)
+        ttk.Label(top_frame, text="服务器地址:").grid(row=0, column=0, padx=5, sticky=tk.W)
         self.server_ip = tk.StringVar()
         ttk.Entry(top_frame, textvariable=self.server_ip, width=15).grid(row=0, column=1, padx=5)
         
@@ -230,16 +230,32 @@ class SMBBrowserApp:
         threading.Thread(target=self.connect, daemon=True).start()
 
     def connect(self):
-        ip = self.server_ip.get().strip()
+        addr_input = self.server_ip.get().strip()
         user_port_str = self.port.get().strip()
         user = self.username.get().strip()
         password = self.password.get().strip()
         
-        if not ip:
-            self.show_error("错误", "请输入服务器 IP")
+        if not addr_input:
+            self.show_error("错误", "请输入服务器地址")
             self.update_status("就绪")
             self.root.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             return
+
+        # Resolve hostname to IP if needed
+        real_ip = addr_input
+        try:
+            # Check if it's already an IP
+            socket.inet_aton(addr_input)
+        except socket.error:
+            # Not an IP, try to resolve
+            try:
+                self.update_status(f"正在解析主机名 {addr_input}...")
+                real_ip = socket.gethostbyname(addr_input)
+                self.update_status(f"主机名已解析: {addr_input} -> {real_ip}")
+            except Exception as e:
+                 print(f"DNS Resolution failed: {e}")
+                 # Continue anyway, pysmb/socket might handle it or fail later
+                 pass
 
         ports_to_try = []
         if user_port_str:
@@ -256,9 +272,10 @@ class SMBBrowserApp:
         # Try to resolve NetBIOS name once
         remote_name = "*SMBSERVER"
         try:
-            self.update_status(f"正在解析 NetBIOS 名称 {ip}...")
+            # Use the resolved IP for NetBIOS query
+            self.update_status(f"正在解析 NetBIOS 名称 {real_ip}...")
             nb = NetBIOS()
-            resolved = nb.queryIPForName(ip, port=137, timeout=2)
+            resolved = nb.queryIPForName(real_ip, port=137, timeout=2)
             nb.close()
             if resolved:
                 remote_name = resolved[0]
@@ -270,7 +287,7 @@ class SMBBrowserApp:
 
         for port in ports_to_try:
             try:
-                self.update_status(f"正在尝试连接 {ip}:{port}...")
+                self.update_status(f"正在尝试连接 {real_ip}:{port}...")
                 
                 is_direct = (port == 445)
                 self.conn = SMBConnection(
@@ -283,9 +300,9 @@ class SMBBrowserApp:
                     is_direct_tcp=is_direct
                 )
                 
-                if self.conn.connect(ip, port, timeout=5):
+                if self.conn.connect(real_ip, port, timeout=5):
                     success = True
-                    self.update_status(f"已连接到 {ip} 端口 {port}")
+                    self.update_status(f"已连接到 {real_ip} 端口 {port}")
                     
                     # Update the UI port to show what actually worked
                     self.root.after(0, lambda p=port: self.port.set(str(p)))
@@ -307,13 +324,13 @@ class SMBBrowserApp:
                 
                 # Determine protocol version for display
                 protocol_ver = "SMB2/3" if self.conn.isUsingSMB2 else "SMB1"
-                self.update_status(f"已连接到 {ip} (协议: {protocol_ver})")
+                self.update_status(f"已连接到 {real_ip} (协议: {protocol_ver})")
             except Exception as e:
                 self.show_error("列出共享错误", str(e))
                 self.update_status("已连接 (获取列表失败)")
         else:
             msg = last_error if last_error else "连接失败"
-            self.show_error("连接错误", f"无法连接到 {ip}.\n已尝试端口: {ports_to_try}\n错误: {msg}")
+            self.show_error("连接错误", f"无法连接到 {real_ip}.\n已尝试端口: {ports_to_try}\n错误: {msg}")
             self.update_status("连接失败")
             self.conn = None
         
