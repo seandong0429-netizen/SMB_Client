@@ -23,7 +23,7 @@ import json
 class SMBBrowserApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("云铠 SMB 浏览器 1.0")
+        self.root.title("云铠 SMB 浏览器 1.1")
         self.root.geometry("800x600")
         
         # Style
@@ -71,7 +71,7 @@ class SMBBrowserApp:
 
         # Title
         tk.Label(container, text="云铠 SMB 浏览器", font=("Helvetica", 18, "bold"), bg='white', fg='#333333').pack(pady=(10, 5))
-        tk.Label(container, text="v1.0", font=("Helvetica", 12), bg='white', fg='#888888').pack(pady=(0, 20))
+        tk.Label(container, text="v1.1", font=("Helvetica", 12), bg='white', fg='#888888').pack(pady=(0, 20))
         
         # Info card
         info_frame = tk.Frame(container, bg='#f5f5f5', padx=15, pady=10) # Light gray bg for info
