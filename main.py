@@ -66,7 +66,7 @@ class SMBBrowserApp:
         container.pack(fill=tk.BOTH, expand=True)
 
         # Title
-        tk.Label(container, text="云铠 SMB 浏览器", font=("Helvetica", 18, "bold"), bg='white', fg='#333333').pack(pady=(10, 5))
+        tk.Label(container, text="科恒办公 SMB 浏览器", font=("Helvetica", 18, "bold"), bg='white', fg='#333333').pack(pady=(10, 5))
         tk.Label(container, text="v1.2", font=("Helvetica", 12), bg='white', fg='#888888').pack(pady=(0, 20))
         
         # Info card
