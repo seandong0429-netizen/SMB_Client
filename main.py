@@ -21,7 +21,7 @@ import pystray
 class SMBBrowserApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("科恒办公 SMB 浏览器 1.2")
+        self.root.title("云铠智能办公 SMB 浏览器 1.2")
         self.root.geometry("800x600")
         
         # Style
@@ -80,7 +80,7 @@ class SMBBrowserApp:
         container.pack(fill=tk.BOTH, expand=True)
 
         # Title
-        tk.Label(container, text="科恒办公 SMB 浏览器", font=("Helvetica", 18, "bold"), bg='white', fg='#333333').pack(pady=(10, 5))
+        tk.Label(container, text="云铠智能办公 SMB 浏览器", font=("Helvetica", 18, "bold"), bg='white', fg='#333333').pack(pady=(10, 5))
         tk.Label(container, text="v1.2", font=("Helvetica", 12), bg='white', fg='#888888').pack(pady=(0, 20))
         
         # Info card
@@ -669,7 +669,7 @@ class SMBBrowserApp:
             pystray.MenuItem("退出", self.quit_window)
         )
         
-        self.icon = pystray.Icon("name", image, "科恒办公 SMB 浏览器", menu)
+        self.icon = pystray.Icon("name", image, "云铠智能办公 SMB 浏览器", menu)
         threading.Thread(target=self.icon.run, daemon=True).start()
 
     def show_window(self, icon, item):
