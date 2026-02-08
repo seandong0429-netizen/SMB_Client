@@ -15,6 +15,8 @@ import subprocess
 import sys
 
 import json
+from PIL import Image
+import pystray
 
 class SMBBrowserApp:
     def __init__(self, root):
@@ -38,6 +40,18 @@ class SMBBrowserApp:
         self.setup_ui()
         self.setup_menu()
         self.load_config()
+        
+        # System Tray Protocol
+        self.root.protocol('WM_DELETE_WINDOW', self.on_closing)
+
+    def resource_path(self, relative_path):
+        """ Get absolute path to resource, works for dev and for PyInstaller """
+        try:
+            # PyInstaller creates a temp folder and stores path in _MEIPASS
+            base_path = sys._MEIPASS
+        except Exception:
+            base_path = os.path.abspath(".")
+        return os.path.join(base_path, relative_path)
 
     def setup_menu(self):
         menubar = tk.Menu(self.root)
@@ -79,16 +93,7 @@ class SMBBrowserApp:
         # QR Code Image Section
         try:
             # Use resource_path helper for PyInstaller compatibility
-            def resource_path(relative_path):
-                """ Get absolute path to resource, works for dev and for PyInstaller """
-                try:
-                    # PyInstaller creates a temp folder and stores path in _MEIPASS
-                    base_path = sys._MEIPASS
-                except Exception:
-                    base_path = os.path.abspath(".")
-                return os.path.join(base_path, relative_path)
-
-            img_path = resource_path("wechat_qr.png")
+            img_path = self.resource_path("wechat_qr.png")
             
             if os.path.exists(img_path):
                 # Load image
@@ -209,7 +214,7 @@ class SMBBrowserApp:
                     self.server_ip.set(config.get("ip", ""))
                     self.port.set(config.get("port", "445"))
                     self.username.set(config.get("user", "guest"))
-                    # Password is NOT saved for security, or can be if requested (keeping it safe for now)
+                    self.password.set(config.get("password", ""))
         except Exception as e:
             print(f"Failed to load config: {e}")
 
@@ -218,7 +223,8 @@ class SMBBrowserApp:
             config = {
                 "ip": self.server_ip.get(),
                 "port": self.port.get(),
-                "user": self.username.get()
+                "user": self.username.get(),
+                "password": self.password.get()
             }
             with open(self.config_file, 'w') as f:
                 json.dump(config, f)
@@ -647,6 +653,41 @@ class SMBBrowserApp:
             report += "\n\n错误详情 (前5个):\n" + "\n".join(errors[:5])
         
         self.root.after(0, lambda: messagebox.showinfo("报告", report))
+
+    def on_closing(self):
+        self.minimize_to_tray()
+
+    def minimize_to_tray(self):
+        self.root.withdraw()
+        
+        # Load icon image
+        icon_path = self.resource_path("app_icon.ico")
+        image = Image.open(icon_path) if os.path.exists(icon_path) else self.create_default_icon()
+        
+        menu = pystray.Menu(
+            pystray.MenuItem("显示", self.show_window),
+            pystray.MenuItem("退出", self.quit_window)
+        )
+        
+        self.icon = pystray.Icon("name", image, "科恒办公 SMB 浏览器", menu)
+        threading.Thread(target=self.icon.run, daemon=True).start()
+
+    def show_window(self, icon, item):
+        self.icon.stop()
+        self.root.after(0, self.root.deiconify)
+
+    def quit_window(self, icon, item):
+        self.icon.stop()
+        self.root.after(0, self.root.destroy)
+
+    def create_default_icon(self):
+        # Create a basic image if icon file not found
+        width = 64
+        height = 64
+        color1 = (0, 0, 255)
+        color2 = (255, 255, 255)
+        image = Image.new('RGB', (width, height), color1)
+        return image
 
 if __name__ == "__main__":
     root = tk.Tk()
