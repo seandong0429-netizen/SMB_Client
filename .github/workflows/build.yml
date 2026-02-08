@@ -28,7 +28,7 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        pyinstaller --onefile --windowed --icon="app_icon.ico" --add-data "wechat_qr.png;." --add-data "app_icon.ico;." --name "KeHeng_Office_Temp" --hidden-import=smb --hidden-import=nmb main.py
+        pyinstaller --onefile --windowed --add-data "wechat_qr.png;." --name "KeHeng_Office_Temp" --hidden-import=smb --hidden-import=nmb main.py
 
     - name: Rename Executable
       run: |
