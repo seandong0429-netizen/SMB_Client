@@ -32,7 +32,12 @@ class SMBBrowserApp:
         self.current_share = None
         self.current_path = ""
         self.file_list = []
-        self.config_file = "config.json"
+        
+        # Config path in user home directory
+        self.config_dir = os.path.join(os.path.expanduser("~"), ".yunkai_smb_client")
+        if not os.path.exists(self.config_dir):
+            os.makedirs(self.config_dir)
+        self.config_file = os.path.join(self.config_dir, "config.json")
         
         # For thread safety in UI updates
         self.lock = threading.Lock()
