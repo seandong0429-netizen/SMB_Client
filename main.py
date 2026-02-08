@@ -669,13 +669,22 @@ class SMBBrowserApp:
         icon_path = self.resource_path("app_icon.ico")
         image = Image.open(icon_path) if os.path.exists(icon_path) else self.create_default_icon()
         
+        # Set default action on double click (or single click depending on OS)
         menu = pystray.Menu(
-            pystray.MenuItem("显示", self.show_window),
+            pystray.MenuItem("显示", self.show_window, default=True),
             pystray.MenuItem("退出", self.quit_window)
         )
         
         self.icon = pystray.Icon("name", image, "云铠智能办公 SMB 浏览器", menu)
-        threading.Thread(target=self.icon.run, daemon=True).start()
+        # Use setup callback to show notification once icon is ready
+        threading.Thread(target=self.icon.run, kwargs={'setup': self.setup_tray}, daemon=True).start()
+
+    def setup_tray(self, icon):
+        icon.visible = True
+        try:
+            icon.notify("程序已最小化到此处，双击图标可恢复显示", "云铠智能办公")
+        except Exception as e:
+            print(f"Notification failed: {e}")
 
     def show_window(self, icon, item):
         self.icon.stop()
