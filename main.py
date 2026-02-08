@@ -12,10 +12,6 @@ import platform
 import tempfile
 import subprocess
 
-import os
-import platform
-import tempfile
-import subprocess
 import sys
 
 import json
@@ -23,7 +19,7 @@ import json
 class SMBBrowserApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("云铠智能办公 SMB 浏览器 1.2")
+        self.root.title("科恒办公 SMB 浏览器 1.2")
         self.root.geometry("800x600")
         
         # Style
@@ -422,14 +418,8 @@ class SMBBrowserApp:
             
             self.update_status(f"正在打开 {filename}...")
             
-            # 根据系统打开文件
-            system_name = platform.system()
-            if system_name == 'Darwin':       # macOS
-                subprocess.run(['open', save_path])
-            elif system_name == 'Windows':    # Windows
-                os.startfile(save_path)
-            else:                             # Linux/Unix
-                subprocess.run(['xdg-open', save_path])
+            # Windows 下打开文件
+            os.startfile(save_path)
                 
             self.update_status(f"已打开 {filename}")
             

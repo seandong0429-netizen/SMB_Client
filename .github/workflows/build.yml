@@ -1,29 +1,8 @@
-name: Build SMB Browser Variants
-
-on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:
-
 jobs:
   build:
-    name: Build ${{ matrix.variant_name }}
+    name: Build KeHeng Office
     runs-on: windows-latest
-    strategy:
-      matrix:
-        include:
-          - variant_name: "AnHeng"
-            window_title: "安恒办公客户端 1.0"
-            # PyInstaller might have issues with non-ASCII names depending on valid filesystem chars, 
-            # though Windows supports it. We use a safe temp name then rename.
-            temp_exe_name: "AnHeng_Office_Client" 
-            final_exe_name: "安恒办公客户端 1.0"
-          
-          - variant_name: "KeHeng"
-            window_title: "科恒办公客户端1.0"
-            temp_exe_name: "KeHeng_Office_Client"
-            final_exe_name: "科恒办公客户端1.0"
-
+    
     steps:
     - uses: actions/checkout@v4
 
@@ -38,50 +17,18 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
-    - name: Update Window Title in main.py
-      shell: python
-      env:
-        NEW_TITLE: ${{ matrix.window_title }}
-      run: |
-        import os
-        
-        new_title = os.environ['NEW_TITLE']
-        file_path = 'main.py'
-        
-        # Original line to find: self.root.title("云铠智能办公 SMB 浏览器 1.2")
-        # We target the specific string for replacement
-        original_title_code = 'self.root.title("云铠智能办公 SMB 浏览器 1.2")'
-        new_title_code = f'self.root.title("{new_title}")'
-        
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            if original_title_code in content:
-                new_content = content.replace(original_title_code, new_title_code)
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(new_content)
-                print(f"Successfully updated title to: {new_title}")
-            else:
-                print("WARNING: Could not find exact original title string to replace.")
-                # Optional: Print content snippet to debug if needed
-                # print(content[:200])
-        except Exception as e:
-            print(f"Error updating main.py: {e}")
-            exit(1)
-
     - name: Build with PyInstaller
       run: |
-        pyinstaller --onefile --windowed --add-data "wechat_qr.png;." --name "${{ matrix.temp_exe_name }}" --hidden-import=smb --hidden-import=nmb main.py
+        pyinstaller --onefile --windowed --add-data "wechat_qr.png;." --name "KeHeng_Office_Temp" --hidden-import=smb --hidden-import=nmb main.py
 
     - name: Rename Executable
       run: |
         cd dist
-        mv "${{ matrix.temp_exe_name }}.exe" "${{ matrix.final_exe_name }}.exe"
+        mv "KeHeng_Office_Temp.exe" "科恒办公.exe"
       shell: bash
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ matrix.final_exe_name }}_Pack
-        path: dist/${{ matrix.final_exe_name }}.exe
+        name: KeHeng_Office_Pack
+        path: dist/科恒办公.exe
