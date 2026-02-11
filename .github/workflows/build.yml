@@ -26,12 +26,12 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
-    - name: Build KeHeng Office
+    - name: Build YunKai Office
       run: |
-        pyinstaller --onefile --windowed --icon="keheng.ico" --add-data "wechat_qr.png;." --add-data "keheng.ico;." --name "KeHeng_Office_v1.2" --hidden-import=smb --hidden-import=nmb --hidden-import=pystray --hidden-import=PIL main.py
+        pyinstaller --onefile --windowed --icon="app_icon.ico" --add-data "wechat_qr.png;." --add-data "app_icon.ico;." --name "YunKai_Scan_Client_v1.2" --hidden-import=smb --hidden-import=nmb --hidden-import=pystray --hidden-import=PIL main.py
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: KeHeng_Office_SMB_Browser
-        path: dist/KeHeng_Office_v1.2.exe
+        name: YunKai_Scan_Client
+        path: dist/YunKai_Scan_Client_v1.2.exe

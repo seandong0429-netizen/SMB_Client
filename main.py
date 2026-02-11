@@ -19,10 +19,10 @@ from PIL import Image
 import pystray
  
  # Branding Configuration
-APP_TITLE = "科恒办公SMB浏览器"
+APP_TITLE = "云铠智能办公扫描客户端"
 APP_VERSION = "1.2"
-APP_ICON_NAME = "keheng.ico"
-COMPANY_NAME = "科恒办公"
+APP_ICON_NAME = "app_icon.ico"
+COMPANY_NAME = "云铠智能办公"
 
 class SMBBrowserApp:
     def __init__(self, root):
