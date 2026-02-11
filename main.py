@@ -194,7 +194,17 @@ class SMBBrowserApp:
 
         # Treeview for files
         columns = ("Size", "Type")
-        self.tree = ttk.Treeview(mid_frame, columns=columns, show="tree headings")
+        
+        # Container for tree and scrollbar
+        tree_frame = ttk.Frame(mid_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Scrollbar first (packed right)
+        scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.tree = ttk.Treeview(tree_frame, columns=columns, show="tree headings", yscrollcommand=scrollbar.set)
+        
         self.tree.heading("#0", text="名称", anchor="w")
         self.tree.heading("Size", text="大小")
         self.tree.heading("Type", text="类型")
@@ -203,11 +213,9 @@ class SMBBrowserApp:
         self.tree.column("Size", width=100)
         self.tree.column("Type", width=100)
         
-        self.tree.pack(fill=tk.BOTH, expand=True)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        scrollbar = ttk.Scrollbar(mid_frame, orient=tk.VERTICAL, command=self.tree.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.tree.configure(yscroll=scrollbar.set)
+        scrollbar.config(command=self.tree.yview)
         
         self.tree.bind("<Double-1>", self.on_double_click)
 
@@ -571,15 +579,14 @@ class SMBBrowserApp:
 
         # mode passed as argument
         
-        # 收集所有选中的文件（忽略文件夹）
+        # 收集所有选中的文件（忽略文件夹） -> This comment is outdated
         files_to_process = []
         has_folder = False
         for iid in selected_items:
             item = self.tree.item(iid)
             if item['values'][1] == "文件夹":
                 has_folder = True
-            else:
-                files_to_process.append(item['text'])
+            files_to_process.append(item['text'])
         
         if not files_to_process:
             msg = "未选择文件。"
