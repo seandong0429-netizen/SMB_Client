@@ -26,36 +26,12 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
-    - name: Build YunKai Office (Default)
-      run: |
-        pyinstaller --onefile --windowed --icon="app_icon.ico" --add-data "wechat_qr.png;." --add-data "app_icon.ico;." --name "YunKai_Office_Temp" --hidden-import=smb --hidden-import=nmb --hidden-import=pystray --hidden-import=PIL main.py
-
-    - name: Prepare KeHeng Office Branding
-      shell: bash
-      run: |
-        # Use sed to replace branding constants in main.py
-        sed -i 's/APP_TITLE = "云铠智能办公 SMB 浏览器"/APP_TITLE = "科恒办公 SMB 浏览器"/g' main.py
-        sed -i 's/APP_ICON_NAME = "app_icon.ico"/APP_ICON_NAME = "keheng.ico"/g' main.py
-        sed -i 's/COMPANY_NAME = "云铠智能办公"/COMPANY_NAME = "科恒办公"/g' main.py
-        
-        # Verify changes (optional, for debug)
-        grep "APP_TITLE" main.py
-
     - name: Build KeHeng Office
       run: |
-        pyinstaller --onefile --windowed --icon="keheng.ico" --add-data "wechat_qr.png;." --add-data "keheng.ico;." --name "KeHeng_Office_Temp" --hidden-import=smb --hidden-import=nmb --hidden-import=pystray --hidden-import=PIL main.py
-
-    - name: Rename Executables
-      shell: bash
-      run: |
-        cd dist
-        mv "YunKai_Office_Temp.exe" "云铠智能办公 SMB 浏览器.exe"
-        mv "KeHeng_Office_Temp.exe" "科恒办公 SMB 浏览器.exe"
+        pyinstaller --onefile --windowed --icon="keheng.ico" --add-data "wechat_qr.png;." --add-data "keheng.ico;." --name "KeHeng_Office_v1.2" --hidden-import=smb --hidden-import=nmb --hidden-import=pystray --hidden-import=PIL main.py
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: Office_Suite_Pack
-        path: |
-          dist/云铠智能办公 SMB 浏览器.exe
-          dist/科恒办公 SMB 浏览器.exe
+        name: KeHeng_Office_SMB_Browser
+        path: dist/KeHeng_Office_v1.2.exe

@@ -19,10 +19,10 @@ from PIL import Image
 import pystray
  
  # Branding Configuration
-APP_TITLE = "云铠智能办公 SMB 浏览器"
+APP_TITLE = "科恒办公SMB浏览器"
 APP_VERSION = "1.2"
-APP_ICON_NAME = "app_icon.ico"
-COMPANY_NAME = "云铠智能办公"
+APP_ICON_NAME = "keheng.ico"
+COMPANY_NAME = "科恒办公"
 
 class SMBBrowserApp:
     def __init__(self, root):
@@ -173,6 +173,9 @@ class SMBBrowserApp:
         
         self.back_btn = ttk.Button(toolbar, text="返回", state=tk.DISABLED, command=self.go_back)
         self.back_btn.pack(side=tk.LEFT)
+        
+        self.refresh_btn = ttk.Button(toolbar, text="刷新", state=tk.DISABLED, command=self.on_refresh)
+        self.refresh_btn.pack(side=tk.LEFT, padx=5)
         
         self.path_label = ttk.Label(toolbar, text="未连接", anchor="w")
         self.path_label.pack(side=tk.LEFT, padx=10, fill=tk.X, expand=True)
@@ -386,6 +389,7 @@ class SMBBrowserApp:
         self.current_path = ""
         self.path_label.config(text=f"\\\\{self.server_ip.get()}")
         self.back_btn.config(state=tk.DISABLED)
+        self.refresh_btn.config(state=tk.NORMAL)
         self.btn_delete.config(state=tk.DISABLED)
         self.btn_download.config(state=tk.DISABLED)
         self.btn_down_del.config(state=tk.DISABLED)
@@ -395,9 +399,15 @@ class SMBBrowserApp:
             self.tree.delete(item)
             
         for share in shares:
-            # Special shares often usually start with $
-            if not share.isSpecial:
-                self.tree.insert("", "end", text=share.name, values=("共享文件夹", "文件夹"), iid=share.name)
+            # Filter special shares, those containing '$', and 'Distribute'
+            if share.isSpecial:
+                continue
+            if '$' in share.name:
+                continue
+            if share.name.lower() == 'distribute':
+                continue
+                
+            self.tree.insert("", "end", text=share.name, values=("共享文件夹", "文件夹"), iid=share.name)
         
     def on_double_click(self, event):
         item_id = self.tree.selection()[0]
@@ -475,7 +485,10 @@ class SMBBrowserApp:
              display_path += f"\\{path_backslashes}"
         self.path_label.config(text=display_path)
         
+        self.path_label.config(text=display_path)
+        
         self.back_btn.config(state=tk.NORMAL)
+        self.refresh_btn.config(state=tk.NORMAL)
         self.btn_delete.config(state=tk.NORMAL)
         self.btn_download.config(state=tk.NORMAL)
         self.btn_down_del.config(state=tk.NORMAL)
@@ -517,6 +530,17 @@ class SMBBrowserApp:
             self.root.after(0, lambda: self.show_shares(shares))
         except Exception as e:
              self.show_error("连接错误", str(e))
+
+    def on_refresh(self):
+        if self.conn is None:
+            return
+
+        if self.current_share is None:
+            self.update_status("正在刷新共享列表...")
+            threading.Thread(target=self.refresh_shares, daemon=True).start()
+        else:
+            self.update_status(f"正在刷新...")
+            threading.Thread(target=self.list_files, daemon=True).start()
 
     def execute_action(self, mode):
         selected_items = self.tree.selection()
