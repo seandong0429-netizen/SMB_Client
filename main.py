@@ -48,6 +48,9 @@ class SMBBrowserApp:
         # For thread safety in UI updates
         self.lock = threading.Lock()
         
+        # Default download path (Desktop)
+        self.download_save_path = tk.StringVar(value=os.path.join(os.path.expanduser("~"), "Desktop"))
+        
         self.setup_ui()
         self.setup_menu()
         self.load_config()
@@ -180,6 +183,15 @@ class SMBBrowserApp:
         self.path_label = ttk.Label(toolbar, text="未连接", anchor="w")
         self.path_label.pack(side=tk.LEFT, padx=10, fill=tk.X, expand=True)
 
+        # Download Path Selection Frame
+        dl_frame = ttk.Frame(mid_frame)
+        dl_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        ttk.Label(dl_frame, text="下载保存位置:").pack(side=tk.LEFT, padx=(0, 5))
+        self.dl_path_entry = ttk.Entry(dl_frame, textvariable=self.download_save_path)
+        self.dl_path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        ttk.Button(dl_frame, text="选择...", command=self.choose_dl_path, width=8).pack(side=tk.LEFT)
+
         # Treeview for files
         columns = ("Size", "Type")
         self.tree = ttk.Treeview(mid_frame, columns=columns, show="tree headings")
@@ -220,6 +232,11 @@ class SMBBrowserApp:
         self.btn_down_del = ttk.Button(action_frame, text="下载并删除", state=tk.DISABLED, command=lambda: self.execute_action("下载并删除"))
         self.btn_down_del.pack(side=tk.LEFT, padx=5)
 
+    def choose_dl_path(self):
+        path = filedialog.askdirectory(initialdir=self.download_save_path.get())
+        if path:
+            self.download_save_path.set(path)
+
     def load_config(self):
         try:
             if os.path.exists(self.config_file):
@@ -229,6 +246,10 @@ class SMBBrowserApp:
                     self.port.set(config.get("port", "445"))
                     self.username.set(config.get("user", "guest"))
                     self.password.set(config.get("password", ""))
+                    # Load saved download path if exists, else Default is already set in __init__
+                    saved_path = config.get("download_path", "")
+                    if saved_path and os.path.exists(saved_path):
+                        self.download_save_path.set(saved_path)
         except Exception as e:
             print(f"Failed to load config: {e}")
 
@@ -238,7 +259,8 @@ class SMBBrowserApp:
                 "ip": self.server_ip.get(),
                 "port": self.port.get(),
                 "user": self.username.get(),
-                "password": self.password.get()
+                "password": self.password.get(),
+                "download_path": self.download_save_path.get()
             }
             with open(self.config_file, 'w') as f:
                 json.dump(config, f)
@@ -579,18 +601,30 @@ class SMBBrowserApp:
         if has_folder:
              if not messagebox.askyesno("提示", "选中的项目中包含文件夹，文件夹将被忽略。是否继续操作其余文件？"):
                 return
+        
+        # 获取保存路径
+        target_dir = self.download_save_path.get().strip()
+        if not target_dir:
+            # Fallback to desktop if empty
+            target_dir = os.path.join(os.path.expanduser("~"), "Desktop")
+            self.download_save_path.set(target_dir)
+
+        if not os.path.exists(target_dir):
+            try:
+                os.makedirs(target_dir)
+            except Exception as e:
+                 messagebox.showerror("错误", f"无法创建保存目录: {target_dir}\n{str(e)}")
+                 return
 
         # 如果只包含一个文件
         if len(files_to_process) == 1:
             filename = files_to_process[0]
-            save_path = filedialog.asksaveasfilename(initialfile=filename)
-            if save_path:
-                threading.Thread(target=self.perform_download_single, args=(filename, save_path, delete_after), daemon=True).start()
+            # No dialog, use target_dir directly
+            threading.Thread(target=self.perform_download_single, args=(filename, target_dir, delete_after), daemon=True).start()
         else:
             # 批量操作
-            target_dir = filedialog.askdirectory()
-            if target_dir:
-                 threading.Thread(target=self.perform_download_batch, args=(files_to_process, target_dir, delete_after), daemon=True).start()
+            # No dialog, use target_dir
+            threading.Thread(target=self.perform_download_batch, args=(files_to_process, target_dir, delete_after), daemon=True).start()
 
     def perform_delete_only(self, files):
         success_count = 0
@@ -621,17 +655,19 @@ class SMBBrowserApp:
         else:
              self.root.after(0, lambda: messagebox.showinfo("成功", f"成功删除 {success_count} 个文件。"))
 
-    def perform_download_single(self, filename, save_path, delete_after):
+    def perform_download_single(self, filename, target_dir, delete_after):
         try:
             self.update_status(f"正在下载 {filename}...")
             path_to_file = filename
             if self.current_path:
                 path_to_file = f"{self.current_path}/{filename}"
-                
+            
+            save_path = os.path.join(target_dir, filename)
+            
             with open(save_path, 'wb') as f:
                 self.conn.retrieveFile(self.current_share, path_to_file, f)
             
-            msg = f"文件已下载: {filename}"
+            msg = f"文件已下载到: {save_path}"
             if delete_after:
                 self.update_status(f"下载收完成，正在删除 {filename}...")
                 self.conn.deleteFiles(self.current_share, path_to_file)
