@@ -355,38 +355,62 @@ class SMBBrowserApp:
         success = False
         errors = {}
 
+        # Prepare list of connection profiles to try (username, use_ntlm_v2, sign_options, description)
+        profiles_to_try = [
+            (user, True, 2, "默认(NTLMv2)"),
+        ]
+        
+        # If the user is default guest and no password, try other combinations for legacy copiers
+        if user.lower() == "guest" and not password:
+            profiles_to_try.extend([
+                ("", True, 2, "匿名(空用户名)"),
+                ("guest", False, 2, "guest+NTLMv1"),
+                ("", False, 2, "匿名+NTLMv1"),
+            ])
+        else:
+            profiles_to_try.append((user, False, 2, "指定用户+NTLMv1(降级)"))
+
         for port in ports_to_try:
             port_success = False
             for r_name in remote_names:
-                try:
-                    self.update_status(f"正在尝试连接 {real_ip}:{port} (Name: {r_name})...")
-                    
-                    is_direct = (port == 445)
-                    self.conn = SMBConnection(
-                        user, 
-                        password, 
-                        client_name, 
-                        r_name, 
-                        use_ntlm_v2=True,
-                        sign_options=2,
-                        is_direct_tcp=is_direct
-                    )
-                    
-                    if self.conn.connect(real_ip, port, timeout=5):
-                        success = True
-                        port_success = True
-                        self.update_status(f"已连接到 {real_ip} 端口 {port}")
+                for p_user, p_ntlmv2, p_sign, p_desc in profiles_to_try:
+                    try:
+                        self.update_status(f"正在尝试 {real_ip}:{port} [{r_name}] - {p_desc}...")
                         
-                        # Update the UI port to show what actually worked
-                        self.root.after(0, lambda p=port: self.port.set(str(p)))
-                        break # Break remote_names loop
-                    else:
-                        # Don't record error yet, try next name
-                         errors[f"{port}-{r_name}"] = "认证失败"
-                except Exception as e:
-                    errors[f"{port}-{r_name}"] = str(e)
-                    print(f"Failed on port {port} name {r_name}: {e}")
-                    self.conn = None
+                        is_direct = (port == 445)
+                        self.conn = SMBConnection(
+                            p_user, 
+                            password, 
+                            client_name, 
+                            r_name, 
+                            use_ntlm_v2=p_ntlmv2,
+                            sign_options=p_sign,
+                            is_direct_tcp=is_direct
+                        )
+                        
+                        if self.conn.connect(real_ip, port, timeout=5):
+                            success = True
+                            port_success = True
+                            self.update_status(f"已连接到 {real_ip} 端口 {port}")
+                            
+                            # Update the UI port to show what actually worked
+                            self.root.after(0, lambda p=port: self.port.set(str(p)))
+                            break # Break profiles loop
+                        else:
+                            errors[f"{port}-{r_name}-{p_desc}"] = "认证失败"
+                    except Exception as e:
+                        err_str = str(e)
+                        errors[f"{port}-{r_name}-{p_desc}"] = err_str
+                        print(f"Failed on port {port} name {r_name} profile {p_desc}: {e}")
+                        self.conn = None
+                        
+                        # Network level errors mean we shouldn't retry authentication combos
+                        err_lower = err_str.lower()
+                        if "time" in err_lower or "socket" in err_lower or "refused" in err_lower or "unreachable" in err_lower:
+                            break # Break profiles loop, try next remote name or port
+                
+                if port_success:
+                    break # Break remote_names loop
             
             if port_success:
                 break # Break ports loop
