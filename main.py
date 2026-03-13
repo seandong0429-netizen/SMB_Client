@@ -226,6 +226,9 @@ class SMBBrowserApp:
         
         self.tree.bind("<Double-1>", self.on_double_click)
         self.tree.bind("<ButtonRelease-1>", self.on_tree_click)
+        
+        # Configure tag for checked rows to have a distinct background color
+        self.tree.tag_configure("checked", background="#d4edda") # light green
 
         # Bottom Frame: Actions
         bottom_frame = ttk.Frame(self.root, padding="10")
@@ -506,7 +509,17 @@ class SMBBrowserApp:
                     # Update ONLY the "Select" column (index 0) for this item
                     new_values = list(item['values'])
                     new_values[0] = new_val
-                    self.tree.item(item_id, values=new_values)
+                    
+                    # Manage 'checked' tag for highlighting
+                    current_tags = list(item.get('tags', []))
+                    if new_val == self.CHECKED:
+                        if 'checked' not in current_tags:
+                            current_tags.append('checked')
+                    else:
+                        if 'checked' in current_tags:
+                            current_tags.remove('checked')
+                            
+                    self.tree.item(item_id, values=new_values, tags=current_tags)
                     
                     self.update_select_all_state()
 
@@ -539,7 +552,17 @@ class SMBBrowserApp:
             if item['values'][0] != target_state:
                 new_values = list(item['values'])
                 new_values[0] = target_state
-                self.tree.item(item_id, values=new_values)
+                
+                # Manage 'checked' tag
+                current_tags = list(item.get('tags', []))
+                if target_state == self.CHECKED:
+                    if 'checked' not in current_tags:
+                        current_tags.append('checked')
+                else:
+                    if 'checked' in current_tags:
+                        current_tags.remove('checked')
+                
+                self.tree.item(item_id, values=new_values, tags=current_tags)
 
     def open_file(self, filename):
         threading.Thread(target=self.perform_file_open, args=(filename,), daemon=True).start()
