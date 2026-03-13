@@ -39,6 +39,11 @@ class SMBBrowserApp:
         self.current_path = ""
         self.file_list = []
         
+        # Selection states
+        self.CHECKED = "☑"
+        self.UNCHECKED = "☐"
+        self.select_all_var = tk.BooleanVar(value=False)
+        
         # Config path in user home directory
         self.config_dir = os.path.join(os.path.expanduser("~"), ".yunkai_smb_client")
         if not os.path.exists(self.config_dir):
@@ -193,7 +198,7 @@ class SMBBrowserApp:
         ttk.Button(dl_frame, text="选择...", command=self.choose_dl_path, width=8).pack(side=tk.LEFT)
 
         # Treeview for files
-        columns = ("Size", "Type")
+        columns = ("Select", "Name", "Size", "Type")
         
         # Container for tree and scrollbar
         tree_frame = ttk.Frame(mid_frame)
@@ -203,13 +208,15 @@ class SMBBrowserApp:
         scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        self.tree = ttk.Treeview(tree_frame, columns=columns, show="tree headings", yscrollcommand=scrollbar.set)
+        self.tree = ttk.Treeview(tree_frame, columns=columns, show="headings", yscrollcommand=scrollbar.set)
         
-        self.tree.heading("#0", text="名称", anchor="w")
+        self.tree.heading("Select", text="选择")
+        self.tree.heading("Name", text="名称", anchor="w")
         self.tree.heading("Size", text="大小")
         self.tree.heading("Type", text="类型")
         
-        self.tree.column("#0", width=400)
+        self.tree.column("Select", width=50, anchor="center")
+        self.tree.column("Name", width=350, anchor="w")
         self.tree.column("Size", width=100)
         self.tree.column("Type", width=100)
         
@@ -218,6 +225,7 @@ class SMBBrowserApp:
         scrollbar.config(command=self.tree.yview)
         
         self.tree.bind("<Double-1>", self.on_double_click)
+        self.tree.bind("<ButtonRelease-1>", self.on_tree_click)
 
         # Bottom Frame: Actions
         bottom_frame = ttk.Frame(self.root, padding="10")
@@ -227,9 +235,11 @@ class SMBBrowserApp:
         ttk.Label(bottom_frame, textvariable=self.status_var).pack(side=tk.LEFT)
         
         # Actions Selection
-        # Actions Selection
         action_frame = ttk.Frame(bottom_frame)
         action_frame.pack(side=tk.RIGHT)
+
+        self.btn_select_all = ttk.Checkbutton(action_frame, text="全选", variable=self.select_all_var, command=self.on_select_all, state=tk.DISABLED)
+        self.btn_select_all.pack(side=tk.LEFT, padx=10)
 
         self.btn_delete = ttk.Button(action_frame, text="仅删除", state=tk.DISABLED, command=lambda: self.execute_action("仅删除"))
         self.btn_delete.pack(side=tk.LEFT, padx=5)
@@ -447,6 +457,8 @@ class SMBBrowserApp:
         self.btn_delete.config(state=tk.DISABLED)
         self.btn_download.config(state=tk.DISABLED)
         self.btn_down_del.config(state=tk.DISABLED)
+        self.btn_select_all.config(state=tk.DISABLED)
+        self.select_all_var.set(False)
         
         # Clear tree
         for item in self.tree.get_children():
@@ -461,18 +473,73 @@ class SMBBrowserApp:
             if share.name.lower() == 'distribute':
                 continue
                 
-            self.tree.insert("", "end", text=share.name, values=("共享文件夹", "文件夹"), iid=share.name)
+            self.tree.insert("", "end", values=("", share.name, "共享文件夹", "文件夹"), iid=share.name)
         
     def on_double_click(self, event):
-        item_id = self.tree.selection()[0]
+        item_id = self.tree.focus()
+        if not item_id:
+            return
         item = self.tree.item(item_id)
-        name = item['text']
-        i_type = item['values'][1]
+        name = item['values'][1] # Name is at index 1
+        i_type = item['values'][3] # Type is at index 3
         
         if i_type == "文件夹" or self.current_share is None:
             self.enter_directory(name)
         else:
             self.open_file(name)
+
+    def on_tree_click(self, event):
+        # Only handle checkbox clicks if we have an active share
+        if self.current_share is None:
+            return
+
+        region = self.tree.identify("region", event.x, event.y)
+        if region == "cell":
+            column = self.tree.identify_column(event.x)
+            if column == '#1':  # "Select" Column
+                item_id = self.tree.focus()
+                if item_id:
+                    item = self.tree.item(item_id)
+                    current_val = item['values'][0]
+                    # Toggle selection symbol
+                    new_val = self.CHECKED if current_val == self.UNCHECKED else self.UNCHECKED
+                    # Update ONLY the "Select" column (index 0) for this item
+                    new_values = list(item['values'])
+                    new_values[0] = new_val
+                    self.tree.item(item_id, values=new_values)
+                    
+                    self.update_select_all_state()
+
+    def update_select_all_state(self):
+        # Check if all items are checked
+        all_checked = True
+        has_items = False
+        for item_id in self.tree.get_children():
+            has_items = True
+            item = self.tree.item(item_id)
+            if item['values'][0] == self.UNCHECKED:
+                all_checked = False
+                break
+        
+        if has_items and all_checked:
+            if not self.select_all_var.get():
+                self.select_all_var.set(True)
+        else:
+            if self.select_all_var.get():
+                self.select_all_var.set(False)
+
+    def on_select_all(self):
+        # Update every item based on the select_all checkbutton state
+        if self.current_share is None:
+            return
+            
+        target_state = self.CHECKED if self.select_all_var.get() else self.UNCHECKED
+        for item_id in self.tree.get_children():
+            item = self.tree.item(item_id)
+            if item['values'][0] != target_state:
+                new_values = list(item['values'])
+                new_values[0] = target_state
+                self.tree.item(item_id, values=new_values)
 
     def open_file(self, filename):
         threading.Thread(target=self.perform_file_open, args=(filename,), daemon=True).start()
@@ -546,6 +613,8 @@ class SMBBrowserApp:
         self.btn_delete.config(state=tk.NORMAL)
         self.btn_download.config(state=tk.NORMAL)
         self.btn_down_del.config(state=tk.NORMAL)
+        self.btn_select_all.config(state=tk.NORMAL)
+        self.select_all_var.set(False)
         
         for item in self.tree.get_children():
             self.tree.delete(item)
@@ -557,8 +626,9 @@ class SMBBrowserApp:
             ftype = "文件夹" if f.isDirectory else "文件"
             size = f"{f.file_size / 1024:.1f} KB" if not f.isDirectory else ""
             
-            # Simple icon differentiation by type text
-            self.tree.insert("", "end", text=f.filename, values=(size, ftype))
+            # Insert item using characters to simulate checkboxes
+            # Select column contains UNCHECKED by default inside a directory
+            self.tree.insert("", "end", values=(self.UNCHECKED, f.filename, size, ftype))
 
     def go_back(self):
         if not self.current_share:
@@ -603,14 +673,15 @@ class SMBBrowserApp:
 
         # mode passed as argument
         
-        # 收集所有选中的文件（忽略文件夹） -> This comment is outdated
+        # 收集所有打勾的文件
         files_to_process = []
         has_folder = False
-        for iid in selected_items:
-            item = self.tree.item(iid)
-            if item['values'][1] == "文件夹":
-                has_folder = True
-            files_to_process.append(item['text'])
+        for item_id in self.tree.get_children():
+            item = self.tree.item(item_id)
+            if item['values'][0] == self.CHECKED:
+                if item['values'][3] == "文件夹":
+                    has_folder = True
+                files_to_process.append(str(item['values'][1])) # filename is index 1
         
         if not files_to_process:
             msg = "未选择文件。"
