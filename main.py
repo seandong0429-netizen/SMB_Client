@@ -41,7 +41,7 @@ class SMBBrowserApp:
         self.file_list = []
         
         # Selection states
-        self.CHECKED = "✅"
+        self.CHECKED = "☑"
         self.UNCHECKED = "☐"
         self._is_all_selected = False
         
