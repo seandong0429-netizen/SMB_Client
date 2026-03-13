@@ -199,7 +199,7 @@ class SMBBrowserApp:
         ttk.Button(dl_frame, text="选择...", command=self.choose_dl_path, width=8).pack(side=tk.LEFT)
 
         # Treeview for files
-        columns = ("Select", "Name", "Size", "Time", "Type")
+        columns = ("Name", "Size", "Time", "Type")
         
         # Container for tree and scrollbar
         tree_frame = ttk.Frame(mid_frame)
@@ -211,14 +211,12 @@ class SMBBrowserApp:
         
         self.tree = ttk.Treeview(tree_frame, columns=columns, show="headings", yscrollcommand=scrollbar.set)
         
-        self.tree.heading("Select", text="")
-        self.tree.heading("Name", text="名称", anchor="w")
+        self.tree.heading("Name", text="名称", anchor="center")
         self.tree.heading("Size", text="大小")
         self.tree.heading("Time", text="时间")
         self.tree.heading("Type", text="类型")
         
-        self.tree.column("Select", width=50, anchor="center")
-        self.tree.column("Name", width=300, anchor="w")
+        self.tree.column("Name", width=350, anchor="w")
         self.tree.column("Size", width=100)
         self.tree.column("Time", width=150)
         self.tree.column("Type", width=100)
@@ -229,9 +227,6 @@ class SMBBrowserApp:
         
         self.tree.bind("<Double-1>", self.on_double_click)
         self.tree.bind("<ButtonRelease-1>", self.on_tree_click)
-        
-        # Configure tag for checked rows to have a distinct background color
-        self.tree.tag_configure("checked", background="#d4edda") # light green
 
         # Bottom Frame: Actions
         bottom_frame = ttk.Frame(self.root, padding="10")
@@ -479,15 +474,16 @@ class SMBBrowserApp:
             if share.name.lower() == 'distribute':
                 continue
                 
-            self.tree.insert("", "end", values=("", share.name, "共享文件夹", "", "文件夹"), iid=share.name)
+            self.tree.insert("", "end", values=(f"{self.UNCHECKED} {share.name}", "共享文件夹", "", "文件夹"), iid=share.name)
         
     def on_double_click(self, event):
         item_id = self.tree.focus()
         if not item_id:
             return
         item = self.tree.item(item_id)
-        name = item['values'][1] # Name is at index 1
-        i_type = item['values'][4] # Type is at index 4 (Select, Name, Size, Time, Type)
+        name_val = str(item['values'][0])
+        name = name_val.split(" ", 1)[1] if " " in name_val else name_val
+        i_type = item['values'][3] # Type is at index 3 (Name, Size, Time, Type)
         
         if i_type == "文件夹" or self.current_share is None:
             self.enter_directory(name)
@@ -507,22 +503,18 @@ class SMBBrowserApp:
                 if item_id:
                     item = self.tree.item(item_id)
                     current_val = item['values'][0]
-                    # Toggle selection symbol
-                    new_val = self.CHECKED if current_val == self.UNCHECKED else self.UNCHECKED
-                    # Update ONLY the "Select" column (index 0) for this item
+                    # Toggle selection symbol inside the string
+                    current_str = str(current_val)
+                    if current_str.startswith(self.UNCHECKED):
+                        new_val = current_str.replace(self.UNCHECKED, self.CHECKED, 1)
+                    else:
+                        new_val = current_str.replace(self.CHECKED, self.UNCHECKED, 1)
+                        
+                    # Update the "Name" column (index 0) for this item
                     new_values = list(item['values'])
                     new_values[0] = new_val
                     
-                    # Manage 'checked' tag for highlighting
-                    current_tags = list(item.get('tags', []))
-                    if new_val == self.CHECKED:
-                        if 'checked' not in current_tags:
-                            current_tags.append('checked')
-                    else:
-                        if 'checked' in current_tags:
-                            current_tags.remove('checked')
-                            
-                    self.tree.item(item_id, values=new_values, tags=current_tags)
+                    self.tree.item(item_id, values=new_values)
                     
                     self.update_select_all_state()
 
@@ -533,7 +525,7 @@ class SMBBrowserApp:
         for item_id in self.tree.get_children():
             has_items = True
             item = self.tree.item(item_id)
-            if item['values'][0] == self.UNCHECKED:
+            if self.UNCHECKED in str(item['values'][0]):
                 all_checked = False
                 break
         
@@ -556,20 +548,22 @@ class SMBBrowserApp:
         self.btn_select_all.config(text=f"{target_state} 全选")
         for item_id in self.tree.get_children():
             item = self.tree.item(item_id)
-            if item['values'][0] != target_state:
+            current_str = str(item['values'][0])
+            
+            needs_update = False
+            new_val = current_str
+            if target_state == self.CHECKED and current_str.startswith(self.UNCHECKED):
+                new_val = current_str.replace(self.UNCHECKED, self.CHECKED, 1)
+                needs_update = True
+            elif target_state == self.UNCHECKED and current_str.startswith(self.CHECKED):
+                new_val = current_str.replace(self.CHECKED, self.UNCHECKED, 1)
+                needs_update = True
+                
+            if needs_update:
                 new_values = list(item['values'])
-                new_values[0] = target_state
+                new_values[0] = new_val
                 
-                # Manage 'checked' tag
-                current_tags = list(item.get('tags', []))
-                if target_state == self.CHECKED:
-                    if 'checked' not in current_tags:
-                        current_tags.append('checked')
-                else:
-                    if 'checked' in current_tags:
-                        current_tags.remove('checked')
-                
-                self.tree.item(item_id, values=new_values, tags=current_tags)
+                self.tree.item(item_id, values=new_values)
 
     def open_file(self, filename):
         threading.Thread(target=self.perform_file_open, args=(filename,), daemon=True).start()
@@ -667,7 +661,7 @@ class SMBBrowserApp:
             
             # Insert item using characters to simulate checkboxes
             # Select column contains UNCHECKED by default inside a directory
-            self.tree.insert("", "end", values=(self.UNCHECKED, f.filename, size, time_str, ftype))
+            self.tree.insert("", "end", values=(f"{self.UNCHECKED} {f.filename}", size, time_str, ftype))
 
     def go_back(self):
         if not self.current_share:
@@ -717,10 +711,13 @@ class SMBBrowserApp:
         has_folder = False
         for item_id in self.tree.get_children():
             item = self.tree.item(item_id)
-            if item['values'][0] == self.CHECKED:
-                if item['values'][4] == "文件夹":  # Type is now at index 4
+            name_val = str(item['values'][0])
+            if name_val.startswith(self.CHECKED):
+                if item['values'][3] == "文件夹":  # Type is now at index 3
                     has_folder = True
-                files_to_process.append(str(item['values'][1])) # filename is index 1
+                
+                filename = name_val.split(" ", 1)[1] if " " in name_val else name_val
+                files_to_process.append(filename)
         
         if not files_to_process:
             msg = "未选择文件。"
@@ -1013,7 +1010,23 @@ class SMBBrowserApp:
         image = Image.new('RGB', (width, height), color1)
         return image
 
+def check_single_instance():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(('127.0.0.1', 49152))
+        return s
+    except socket.error:
+        return None
+
 if __name__ == "__main__":
+    _single_instance_socket = check_single_instance()
+    if not _single_instance_socket:
+        root = tk.Tk()
+        root.withdraw()
+        from tkinter import messagebox
+        messagebox.showwarning("运行提示", "软件已经在运行中，请勿重复打开！")
+        sys.exit(0)
+
     root = tk.Tk()
     app = SMBBrowserApp(root)
     root.mainloop()
