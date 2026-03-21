@@ -153,24 +153,22 @@ class SMBBrowserApp:
         top_frame.pack(fill=tk.X)
         
         # Grid layout for top frame
-        ttk.Label(top_frame, text="服务器地址:").grid(row=0, column=0, padx=5, sticky=tk.W)
+        ttk.Label(top_frame, text="复印机地址:").grid(row=0, column=0, padx=5, sticky=tk.W)
         self.server_ip = tk.StringVar()
         ttk.Entry(top_frame, textvariable=self.server_ip, width=15).grid(row=0, column=1, padx=5)
         
-        ttk.Label(top_frame, text="端口:").grid(row=0, column=2, padx=5, sticky=tk.W)
         self.port = tk.StringVar(value="445")
-        ttk.Entry(top_frame, textvariable=self.port, width=6).grid(row=0, column=3, padx=5)
 
-        ttk.Label(top_frame, text="用户:").grid(row=0, column=4, padx=5, sticky=tk.W)
+        ttk.Label(top_frame, text="用户:").grid(row=0, column=2, padx=5, sticky=tk.W)
         self.username = tk.StringVar(value="guest")
-        ttk.Entry(top_frame, textvariable=self.username, width=12).grid(row=0, column=5, padx=5)
+        ttk.Entry(top_frame, textvariable=self.username, width=12).grid(row=0, column=3, padx=5)
         
-        ttk.Label(top_frame, text="密码:").grid(row=0, column=6, padx=5, sticky=tk.W)
+        ttk.Label(top_frame, text="密码:").grid(row=0, column=4, padx=5, sticky=tk.W)
         self.password = tk.StringVar()
-        ttk.Entry(top_frame, textvariable=self.password, show="*", width=12).grid(row=0, column=7, padx=5)
+        ttk.Entry(top_frame, textvariable=self.password, show="*", width=12).grid(row=0, column=5, padx=5)
         
         self.connect_btn = ttk.Button(top_frame, text="连接", command=self.start_connect_thread)
-        self.connect_btn.grid(row=0, column=8, padx=10)
+        self.connect_btn.grid(row=0, column=6, padx=10)
 
         # Middle Frame: File Browser
         mid_frame = ttk.Frame(self.root, padding="10")
@@ -304,7 +302,7 @@ class SMBBrowserApp:
         password = self.password.get().strip()
         
         if not addr_input:
-            self.show_error("错误", "请输入服务器地址")
+            self.show_error("错误", "请输入复印机地址")
             self.update_status("就绪")
             self.root.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             return
