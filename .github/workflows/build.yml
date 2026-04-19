@@ -28,10 +28,10 @@ jobs:
 
     - name: Build YunKai Office
       run: |
-        pyinstaller --onefile --windowed --icon="app_icon.ico" --add-data "wechat_qr.png;." --add-data "app_icon.ico;." --name "YunKai_Scan_Client_v1.2" --hidden-import=smb --hidden-import=nmb --hidden-import=pystray --hidden-import=PIL main.py
+        pyinstaller --onefile --windowed --icon="app_icon.ico" --add-data "wechat_qr.png;." --add-data "app_icon.ico;." --name "YunKai_Scan_Client_v1.3" --hidden-import=smb --hidden-import=nmb --hidden-import=pystray --hidden-import=PIL main.py
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: YunKai_Scan_Client
-        path: dist/YunKai_Scan_Client_v1.2.exe
+        path: dist/YunKai_Scan_Client_v1.3.exe

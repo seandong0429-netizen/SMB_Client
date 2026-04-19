@@ -21,7 +21,7 @@ import pystray
  
  # Branding Configuration
 APP_TITLE = "科恒办公扫描客户端"
-APP_VERSION = "1.2"
+APP_VERSION = "1.3"
 APP_ICON_NAME = "keheng.ico"
 COMPANY_NAME = "科恒办公"
 
@@ -57,12 +57,24 @@ class SMBBrowserApp:
         # Default download path (Desktop)
         self.download_save_path = tk.StringVar(value=os.path.join(os.path.expanduser("~"), "Desktop"))
         
+        # Path Memory Variables
+        self.last_share = None
+        self.last_path = ""
+        self.favorites = {} # Format: { "Display Name": {"share": "share", "path": "path"} }
+
         self.setup_ui()
         self.setup_menu()
         self.load_config()
         
         # System Tray Protocol
         self.root.protocol('WM_DELETE_WINDOW', self.on_closing)
+
+        # Auto-connect if config is complete
+        if self.server_ip.get() and self.username.get() and self.password.get():
+            self.root.after(100, self.start_connect_thread)
+            
+        # Refresh Favorites UI after loading config
+        self.refresh_favorites_ui()
 
     def resource_path(self, relative_path):
         """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -186,6 +198,13 @@ class SMBBrowserApp:
         
         self.path_label = ttk.Label(toolbar, text="未连接", anchor="w")
         self.path_label.pack(side=tk.LEFT, padx=10, fill=tk.X, expand=True)
+        
+        self.fav_btn = ttk.Button(toolbar, text="⭐ 收藏当前", state=tk.DISABLED, command=self.add_favorite)
+        self.fav_btn.pack(side=tk.RIGHT, padx=5)
+
+        # Favorites Frame (Target 2)
+        self.fav_frame = ttk.Frame(mid_frame)
+        self.fav_frame.pack(fill=tk.X, pady=(0, 5))
 
         # Download Path Selection Frame
         dl_frame = ttk.Frame(mid_frame)
@@ -267,6 +286,13 @@ class SMBBrowserApp:
                     saved_path = config.get("download_path", "")
                     if saved_path and os.path.exists(saved_path):
                         self.download_save_path.set(saved_path)
+                    
+                    # Target 1: Load last path memory
+                    self.last_share = config.get("last_share")
+                    self.last_path = config.get("last_path", "")
+                    
+                    # Target 2: Load favorites
+                    self.favorites = config.get("favorites", {})
         except Exception as e:
             print(f"Failed to load config: {e}")
 
@@ -277,7 +303,10 @@ class SMBBrowserApp:
                 "port": self.port.get(),
                 "user": self.username.get(),
                 "password": self.password.get(),
-                "download_path": self.download_save_path.get()
+                "download_path": self.download_save_path.get(),
+                "last_share": self.current_share,
+                "last_path": self.current_path,
+                "favorites": self.favorites
             }
             with open(self.config_file, 'w') as f:
                 json.dump(config, f)
@@ -428,13 +457,21 @@ class SMBBrowserApp:
             # Save successful connection details
             self.save_config()
             try:
-                self.update_status("正在列出共享...")
-                shares = self.conn.listShares()
-                self.root.after(0, lambda: self.show_shares(shares))
-                
                 # Determine protocol version for display
                 protocol_ver = "SMB2/3" if self.conn.isUsingSMB2 else "SMB1"
                 self.update_status(f"已连接到 {real_ip} (协议: {protocol_ver})")
+                
+                # Target 1: Path memory logic
+                if self.last_share:
+                    self.update_status(f"正在自动进入上次路径: {self.last_share}...")
+                    self.current_share = self.last_share
+                    self.current_path = self.last_path or ""
+                    # Actually check if share still exists or accessible
+                    threading.Thread(target=self.list_files, kwargs={'is_auto_jump': True}, daemon=True).start()
+                else:
+                    self.update_status("正在列出共享...")
+                    shares = self.conn.listShares()
+                    self.root.after(0, lambda: self.show_shares(shares))
             except Exception as e:
                 self.show_error("列出共享错误", str(e))
                 self.update_status("已连接 (获取列表失败)")
@@ -446,10 +483,15 @@ class SMBBrowserApp:
             self.conn = None
         
         self.root.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+        if success:
+             self.root.after(0, lambda: self.fav_btn.config(state=tk.NORMAL))
 
     def show_shares(self, shares):
         self.current_share = None
         self.current_path = ""
+        # Update path memory to root
+        self.save_config()
+        
         self.path_label.config(text=f"\\\\{self.server_ip.get()}")
         self.back_btn.config(state=tk.DISABLED)
         self.refresh_btn.config(state=tk.NORMAL)
@@ -458,6 +500,7 @@ class SMBBrowserApp:
         self.btn_down_del.config(state=tk.DISABLED)
         self.btn_select_all.config(state=tk.DISABLED, text=f"{self.UNCHECKED} 全选")
         self._is_all_selected = False
+        self.fav_btn.config(state=tk.NORMAL) # Still connected, still can favorite (though maybe less useful at root)
         
         # Clear tree
         for item in self.tree.get_children():
@@ -610,15 +653,34 @@ class SMBBrowserApp:
         self.update_status(f"正在列出 {self.current_path}...")
         threading.Thread(target=self.list_files, daemon=True).start()
 
-    def list_files(self):
+    def list_files(self, fav_name=None, is_auto_jump=False):
         try:
+            # Ensure favorite button is enabled when we have a connection
+            self.root.after(0, lambda: self.fav_btn.config(state=tk.NORMAL))
             files = self.conn.listPath(self.current_share, self.current_path)
             self.root.after(0, lambda: self.update_file_list(files))
+            # NOTE: Persistent current path for next startup
+            self.save_config()
         except Exception as e:
-            self.show_error("列出文件错误", str(e))
-            # Revert path change if failed
-            # (Simple logic: just don't update list for now)
+            err_msg = str(e)
+            self.show_error("列出文件错误", err_msg)
             self.update_status("列出文件失败")
+            
+            # Target 1: Logic for jump failures (more general)
+            if fav_name or is_auto_jump:
+                if fav_name:
+                    # Specific check if it's likely a path error before asking for deletion
+                    is_path_error = any(kw in err_msg.lower() for kw in ["not found", "no such", "path", "invalid"])
+                    if is_path_error:
+                        if messagebox.askyesno("设置提示", f"收藏路径 '{fav_name}' 可能已失效，是否从收藏夹中删除？"):
+                            if fav_name in self.favorites:
+                                del self.favorites[fav_name]
+                                self.save_config()
+                                self.refresh_favorites_ui()
+                
+                # Always return to root for jumps to avoid stuck UI
+                self.update_status("路径访问受阻，正在尝试返回根列表...")
+                threading.Thread(target=self.refresh_shares, daemon=True).start()
 
     def update_file_list(self, files):
         # Update breadcrumb
@@ -797,6 +859,68 @@ class SMBBrowserApp:
             self.root.after(0, lambda: messagebox.showwarning("删除报告", report))
         else:
              self.root.after(0, lambda: messagebox.showinfo("成功", f"成功删除 {success_count} 个文件。"))
+
+    # --- Favorites Logic ---
+    
+    def add_favorite(self):
+        if not self.current_share:
+            messagebox.showwarning("提示", "请先进入一个共享文件夹后再进行收藏")
+            return
+            
+        # Determine default name
+        default_name = self.current_path.split('/')[-1] if self.current_path else self.current_share
+        
+        # Simple input dialog
+        from tkinter import simpledialog
+        name = simpledialog.askstring("添加收藏", "请输入收藏文件夹名称:", initialvalue=default_name)
+        
+        if name:
+            self.favorites[name] = {
+                "share": self.current_share,
+                "path": self.current_path
+            }
+            self.save_config()
+            self.refresh_favorites_ui()
+            messagebox.showinfo("成功", f"已添加收藏: {name}")
+
+    def refresh_favorites_ui(self):
+        # Clear current buttons
+        for widget in self.fav_frame.winfo_children():
+            widget.destroy()
+            
+        if not self.favorites:
+            ttk.Label(self.fav_frame, text="暂无收藏 (进入目录后点击⭐按钮添加)", foreground="gray").pack(side=tk.LEFT, padx=5)
+            return
+
+        ttk.Label(self.fav_frame, text="快捷访问:").pack(side=tk.LEFT, padx=(0, 5))
+        
+        for name, data in self.favorites.items():
+            btn = ttk.Button(self.fav_frame, text=name, style="Fav.TButton")
+            btn.pack(side=tk.LEFT, padx=2)
+            
+            # Left click to navigate
+            btn.config(command=lambda d=data, n=name: self.go_to_favorite(d, n))
+            
+            # Right click to delete (bind both for cross-platform)
+            btn.bind("<Button-2>", lambda e, n=name: self.delete_favorite(n)) # Mac
+            btn.bind("<Button-3>", lambda e, n=name: self.delete_favorite(n)) # Win/Linux
+            
+    def go_to_favorite(self, data, name):
+        if not self.conn:
+            messagebox.showwarning("提示", "请先连接到复印机")
+            return
+            
+        self.current_share = data["share"]
+        self.current_path = data["path"]
+        self.update_status(f"正在跳转到收藏: {name}...")
+        threading.Thread(target=self.list_files, kwargs={'fav_name': name}, daemon=True).start()
+        
+    def delete_favorite(self, name):
+        if messagebox.askyesno("删除收藏", f"确定要删除收藏 '{name}' 吗？"):
+            if name in self.favorites:
+                del self.favorites[name]
+                self.save_config()
+                self.refresh_favorites_ui()
 
     def perform_download_single(self, filename, target_dir, delete_after):
         try:
@@ -997,6 +1121,7 @@ class SMBBrowserApp:
 
     def quit_window(self, icon, item):
         self.icon.stop()
+        self.save_config() # Save one last time
         self.root.after(0, self.root.destroy)
 
     def create_default_icon(self):
