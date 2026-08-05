@@ -52,7 +52,11 @@ class SMBBrowserApp:
         self.config_file = os.path.join(self.config_dir, "config.json")
         
         # For thread safety in UI updates
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
+        
+        # Heartbeat for keeping SMB connection alive
+        self._heartbeat_interval = 30000  # 30 seconds
+        self._heartbeat_job = None
         
         # Default download path (Desktop)
         self.download_save_path = tk.StringVar(value=os.path.join(os.path.expanduser("~"), "Desktop"))
@@ -69,9 +73,11 @@ class SMBBrowserApp:
         # System Tray Protocol
         self.root.protocol('WM_DELETE_WINDOW', self.on_closing)
 
-        # Auto-connect if config is complete
-        if self.server_ip.get() and self.username.get() and self.password.get():
-            self.root.after(100, self.start_connect_thread)
+        # Auto-connect if server IP is remembered.
+        # Note: password can be empty for guest/anonymous access (common for copiers),
+        # and connect() already handles fallback auth profiles for that case.
+        if self.server_ip.get().strip():
+            self.root.after(100, lambda: self.start_connect_thread(is_auto=True))
             
         # Refresh Favorites UI after loading config
         self.refresh_favorites_ui()
@@ -319,12 +325,12 @@ class SMBBrowserApp:
     def show_error(self, title, msg):
         self.root.after(0, lambda: messagebox.showerror(title, msg))
 
-    def start_connect_thread(self):
+    def start_connect_thread(self, is_auto=False):
         self.connect_btn.config(state=tk.DISABLED)
         self.update_status("正在连接...")
-        threading.Thread(target=self.connect, daemon=True).start()
+        threading.Thread(target=self.connect, kwargs={'is_auto': is_auto}, daemon=True).start()
 
-    def connect(self):
+    def connect(self, is_auto=False):
         addr_input = self.server_ip.get().strip()
         user_port_str = self.port.get().strip()
         user = self.username.get().strip()
@@ -375,8 +381,8 @@ class SMBBrowserApp:
             nb.close()
             if resolved:
                 remote_names.append(resolved[0])
-        except:
-            pass 
+        except Exception as e:
+            print(f"NetBIOS resolution failed: {e}")
         
         # Always add fallback *SMBSERVER if not already present
         if "*SMBSERVER" not in remote_names:
@@ -416,15 +422,16 @@ class SMBBrowserApp:
                         self.update_status(f"正在尝试 {real_ip}:{port} [{r_name}] - {p_desc}...")
                         
                         is_direct = (port == 445)
-                        self.conn = SMBConnection(
-                            p_user, 
-                            password, 
-                            client_name, 
-                            r_name, 
-                            use_ntlm_v2=p_ntlmv2,
-                            sign_options=p_sign,
-                            is_direct_tcp=is_direct
-                        )
+                        with self.lock:
+                            self.conn = SMBConnection(
+                                p_user, 
+                                password, 
+                                client_name, 
+                                r_name, 
+                                use_ntlm_v2=p_ntlmv2,
+                                sign_options=p_sign,
+                                is_direct_tcp=is_direct
+                            )
                         
                         if self.conn.connect(real_ip, port, timeout=5):
                             success = True
@@ -440,7 +447,8 @@ class SMBBrowserApp:
                         err_str = str(e)
                         errors[f"{port}-{r_name}-{p_desc}"] = err_str
                         print(f"Failed on port {port} name {r_name} profile {p_desc}: {e}")
-                        self.conn = None
+                        with self.lock:
+                            self.conn = None
                         
                         # Network level errors mean we shouldn't retry authentication combos
                         err_lower = err_str.lower()
@@ -457,34 +465,45 @@ class SMBBrowserApp:
             # Save successful connection details
             self.save_config()
             try:
-                # Determine protocol version for display
-                protocol_ver = "SMB2/3" if self.conn.isUsingSMB2 else "SMB1"
+                with self.lock:
+                    protocol_ver = "SMB2/3" if self.conn.isUsingSMB2 else "SMB1"
                 self.update_status(f"已连接到 {real_ip} (协议: {protocol_ver})")
                 
-                # Target 1: Path memory logic
                 if self.last_share:
                     self.update_status(f"正在自动进入上次路径: {self.last_share}...")
                     self.current_share = self.last_share
                     self.current_path = self.last_path or ""
-                    # Actually check if share still exists or accessible
                     threading.Thread(target=self.list_files, kwargs={'is_auto_jump': True}, daemon=True).start()
                 else:
                     self.update_status("正在列出共享...")
-                    shares = self.conn.listShares()
+                    with self.lock:
+                        shares = self.conn.listShares()
                     self.root.after(0, lambda: self.show_shares(shares))
             except Exception as e:
                 self.show_error("列出共享错误", str(e))
                 self.update_status("已连接 (获取列表失败)")
         else:
-            # Construct a detailed error message
             error_details = "\n".join([f"端口 {p}: {e}" for p, e in errors.items()])
-            self.show_error("连接错误", f"无法连接到 {real_ip}.\n\n错误详情:\n{error_details}")
+            if is_auto:
+                # 友好提示：自动连接失败，引导用户手动处理
+                friendly_msg = (
+                    f"自动连接到 {real_ip} 失败。\n\n"
+                    f"请检查：\n"
+                    f"• 复印机是否已开机并连入网络\n"
+                    f"• 输入的地址是否正确\n"
+                    f"• 网络是否可达\n\n"
+                    f"确认无误后，请点击“连接”按钮手动重试。"
+                )
+                self.show_error("自动连接失败", friendly_msg)
+            else:
+                self.show_error("连接错误", f"无法连接到 {real_ip}.\n\n错误详情:\n{error_details}")
             self.update_status("连接失败")
             self.conn = None
         
         self.root.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
         if success:
              self.root.after(0, lambda: self.fav_btn.config(state=tk.NORMAL))
+             self.schedule_heartbeat()
 
     def show_shares(self, shares):
         self.current_share = None
@@ -516,6 +535,39 @@ class SMBBrowserApp:
                 continue
                 
             self.tree.insert("", "end", values=(f"{self.UNCHECKED} {share.name}", "共享文件夹", "", "文件夹"), iid=share.name)
+
+    def schedule_heartbeat(self):
+        """Schedule periodic heartbeat to keep SMB connection alive."""
+        self.stop_heartbeat()
+        self._heartbeat_job = self.root.after(self._heartbeat_interval, self._heartbeat_tick)
+
+    def stop_heartbeat(self):
+        """Cancel the heartbeat timer."""
+        if self._heartbeat_job:
+            self.root.after_cancel(self._heartbeat_job)
+            self._heartbeat_job = None
+
+    def _heartbeat_tick(self):
+        """Perform a lightweight connection check and reschedule."""
+        self._heartbeat_job = None
+        if self.conn is None:
+            return
+        threading.Thread(target=self._heartbeat_check, daemon=True).start()
+
+    def _heartbeat_check(self):
+        """Verify connection health without disturbing UI state."""
+        try:
+            with self.lock:
+                if self.current_share:
+                    self.conn.listPath(self.current_share, self.current_path)
+                else:
+                    self.conn.listShares()
+            # Keep heartbeat going — don't refresh UI to avoid resetting user selections
+            self.root.after(0, self.schedule_heartbeat)
+        except Exception as e:
+            print(f"Heartbeat connection check failed: {e}")
+            self.update_status("连接已断开，正在自动重连...")
+            self.root.after(0, lambda: self.start_connect_thread(is_auto=True))
         
     def on_double_click(self, event):
         item_id = self.tree.focus()
@@ -627,7 +679,8 @@ class SMBBrowserApp:
             
             # 下载文件
             with open(save_path, 'wb') as f:
-                self.conn.retrieveFile(self.current_share, path_to_file, f)
+                with self.lock:
+                    self.conn.retrieveFile(self.current_share, path_to_file, f)
             
             self.update_status(f"正在打开 {filename}...")
             
@@ -655,9 +708,8 @@ class SMBBrowserApp:
 
     def list_files(self, fav_name=None, is_auto_jump=False):
         try:
-            # Ensure favorite button is enabled when we have a connection
-            self.root.after(0, lambda: self.fav_btn.config(state=tk.NORMAL))
-            files = self.conn.listPath(self.current_share, self.current_path)
+            with self.lock:
+                files = self.conn.listPath(self.current_share, self.current_path)
             self.root.after(0, lambda: self.update_file_list(files))
             # NOTE: Persistent current path for next startup
             self.save_config()
@@ -689,9 +741,8 @@ class SMBBrowserApp:
              path_backslashes = self.current_path.replace('/', '\\')
              display_path += f"\\{path_backslashes}"
         self.path_label.config(text=display_path)
-        
-        self.path_label.config(text=display_path)
-        
+
+
         self.back_btn.config(state=tk.NORMAL)
         self.refresh_btn.config(state=tk.NORMAL)
         self.btn_delete.config(state=tk.NORMAL)
@@ -743,7 +794,8 @@ class SMBBrowserApp:
 
     def refresh_shares(self):
         try:
-            shares = self.conn.listShares()
+            with self.lock:
+                shares = self.conn.listShares()
             self.root.after(0, lambda: self.show_shares(shares))
         except Exception as e:
              self.show_error("连接错误", str(e))
@@ -834,15 +886,17 @@ class SMBBrowserApp:
                 
                 is_directory = False
                 try:
-                    attr = self.conn.getAttributes(self.current_share, path_to_file)
-                    is_directory = attr.isDirectory
-                except:
-                    pass
+                    with self.lock:
+                        attr = self.conn.getAttributes(self.current_share, path_to_file)
+                        is_directory = attr.isDirectory
+                except Exception as e:
+                    print(f"Warning: cannot get attributes for {path_to_file}: {e}")
 
                 if is_directory:
                     self.delete_directory_recursive(self.current_share, path_to_file)
                 else:
-                    self.conn.deleteFiles(self.current_share, path_to_file)
+                    with self.lock:
+                        self.conn.deleteFiles(self.current_share, path_to_file)
                 
                 success_count += 1
             except Exception as e:
@@ -933,28 +987,31 @@ class SMBBrowserApp:
             
             is_directory = False
             try:
-                attr = self.conn.getAttributes(self.current_share, path_to_file)
-                is_directory = attr.isDirectory
-            except:
-                pass
+                with self.lock:
+                    attr = self.conn.getAttributes(self.current_share, path_to_file)
+                    is_directory = attr.isDirectory
+            except Exception as e:
+                print(f"Warning: cannot get attributes for {path_to_file}: {e}")
 
             if is_directory:
                 self.download_directory_recursive(self.current_share, path_to_file, save_path)
             else:
                 with open(save_path, 'wb') as f:
-                    self.conn.retrieveFile(self.current_share, path_to_file, f)
+                    with self.lock:
+                        self.conn.retrieveFile(self.current_share, path_to_file, f)
             
             msg = f"下载完成: {save_path}"
             if delete_after:
                 if is_directory:
-                    # Directory delete not fully safe/implemented recursively here yet for delete-after
-                    msg += "\n(文件夹删除暂不支持，请手动删除)"
+                    self.update_status(f"下载完成，正在删除文件夹 {filename}...")
+                    self.delete_directory_recursive(self.current_share, path_to_file)
+                    msg += "\n并已成功从服务器删除文件夹。"
                 else:
                     self.update_status(f"下载完成，正在删除 {filename}...")
-                    self.conn.deleteFiles(self.current_share, path_to_file)
+                    with self.lock:
+                        self.conn.deleteFiles(self.current_share, path_to_file)
                     msg += "\n并已成功从服务器删除。"
-                    # Refresh file list
-                    self.list_files()
+                self.list_files()
             
             self.update_status(f"处理完成: {filename}")
             self.root.after(0, lambda: messagebox.showinfo("成功", msg))
@@ -966,9 +1023,9 @@ class SMBBrowserApp:
         if not os.path.exists(local_path):
             os.makedirs(local_path)
             
-        # List contents of the remote directory
         try:
-            items = self.conn.listPath(share, remote_path)
+            with self.lock:
+                items = self.conn.listPath(share, remote_path)
             for item in items:
                 if item.filename in ['.', '..']:
                     continue
@@ -980,15 +1037,16 @@ class SMBBrowserApp:
                     self.download_directory_recursive(share, remote_item_path, local_item_path)
                 else:
                     with open(local_item_path, 'wb') as f:
-                        self.conn.retrieveFile(share, remote_item_path, f)
+                        with self.lock:
+                            self.conn.retrieveFile(share, remote_item_path, f)
         except Exception as e:
             print(f"Error downloading directory {remote_path}: {e}")
             raise e
 
     def delete_directory_recursive(self, share, remote_path):
-        # List contents
         try:
-            items = self.conn.listPath(share, remote_path)
+            with self.lock:
+                items = self.conn.listPath(share, remote_path)
             for item in items:
                 if item.filename in ['.', '..']:
                     continue
@@ -998,10 +1056,11 @@ class SMBBrowserApp:
                 if item.isDirectory:
                     self.delete_directory_recursive(share, item_path)
                 else:
-                    self.conn.deleteFiles(share, item_path)
+                    with self.lock:
+                        self.conn.deleteFiles(share, item_path)
             
-            # After emptying, delete the directory itself
-            self.conn.deleteDirectory(share, remote_path)
+            with self.lock:
+                self.conn.deleteDirectory(share, remote_path)
         except Exception as e:
             print(f"Error deleting directory {remote_path}: {e}")
             raise e
@@ -1019,55 +1078,28 @@ class SMBBrowserApp:
                     path_to_file = f"{self.current_path}/{filename}"
                 
                 save_path = os.path.join(target_dir, filename)
-                
-                # Check if it's a directory (we need to know if the selected item is a dir)
-                # We can check self.file_list if we stored it, or just try/except or check via listPath?
-                # A simple way is to check the tree item values again or just try to download as file and fail?
-                # Better: In execute_action we know if it is a folder. But here we just have filenames.
-                # We should probably pass the type or reference to the item.
-                # However, the treeview has the type.
-                
-                # Let's check attributes of the file first to know if it is a directory.
-                # Since we already have the file list in the tree, we can assume the user input 'files' came from the tree.
-                # But 'files' argument here is just a list of strings (filenames).
-                # We need to re-fetch attributes or assume.
-                
-                # To be robust, let's get attributes.
-                # But wait, 'files' are from tree selection.
-                # We can pass a list of (filename, is_dir) tuples instead of just strings?
-                # That would require changing execute_action packing.
-                pass 
-                
-                # RE-IMPLEMENTATION BELOW will handle checking via `getAttributes` or just try/except.
-                # Actually, `files` passed into this function are just names. 
-                # Let's change the logic in `execute_action` to pass (name, is_dir) tuples or just check here.
-                # Checking here is safer.
-                
+
                 is_directory = False
                 try:
-                    # Get attributes to check if directory
-                    attr = self.conn.getAttributes(self.current_share, path_to_file)
-                    is_directory = attr.isDirectory
-                except:
-                    # If we can't get attributes, maybe it doesn't exist? verify via listing?
-                    # Or just assume file.
-                    pass
+                    with self.lock:
+                        attr = self.conn.getAttributes(self.current_share, path_to_file)
+                        is_directory = attr.isDirectory
+                except Exception as e:
+                    print(f"Warning: cannot get attributes for {path_to_file}: {e}")
 
                 if is_directory:
                     self.download_directory_recursive(self.current_share, path_to_file, save_path)
                 else:
                     with open(save_path, 'wb') as f:
-                        self.conn.retrieveFile(self.current_share, path_to_file, f)
+                        with self.lock:
+                            self.conn.retrieveFile(self.current_share, path_to_file, f)
                 
-                # Delete if requested, ONLY after successful download
                 if delete_after:
                      if is_directory:
-                         # Recursive delete for directory?
-                         # For now, let's SKIP deleting directories to be safe as per plan.
-                         # Or we can try to delete. `deleteDirectory` only works on empty.
-                         pass
+                         self.delete_directory_recursive(self.current_share, path_to_file)
                      else:
-                        self.conn.deleteFiles(self.current_share, path_to_file)
+                        with self.lock:
+                            self.conn.deleteFiles(self.current_share, path_to_file)
                 
                 success_count += 1
             except Exception as e:
@@ -1089,6 +1121,7 @@ class SMBBrowserApp:
         self.root.after(0, lambda: messagebox.showinfo("报告", report))
 
     def on_closing(self):
+        self.stop_heartbeat()
         self.minimize_to_tray()
 
     def minimize_to_tray(self):
@@ -1120,6 +1153,7 @@ class SMBBrowserApp:
         self.root.after(0, self.root.deiconify)
 
     def quit_window(self, icon, item):
+        self.stop_heartbeat()
         self.icon.stop()
         self.save_config() # Save one last time
         self.root.after(0, self.root.destroy)
