@@ -2,7 +2,7 @@
 # Email: fishis@126.com
 
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 import threading
 from smb.SMBConnection import SMBConnection
 from nmb.NetBIOS import NetBIOS
@@ -44,6 +44,7 @@ class SMBBrowserApp:
         self.CHECKED = "☑"
         self.UNCHECKED = "☐"
         self._is_all_selected = False
+        self._ui_busy = False  # True during batch ops to avoid interrupting user
         
         # Config path in user home directory
         self.config_dir = os.path.join(os.path.expanduser("~"), ".yunkai_smb_client")
@@ -555,19 +556,85 @@ class SMBBrowserApp:
         threading.Thread(target=self._heartbeat_check, daemon=True).start()
 
     def _heartbeat_check(self):
-        """Verify connection health without disturbing UI state."""
+        """Verify connection health and optionally refresh file list incrementally."""
         try:
             with self.lock:
                 if self.current_share:
-                    self.conn.listPath(self.current_share, self.current_path)
+                    files = self.conn.listPath(self.current_share, self.current_path)
                 else:
                     self.conn.listShares()
-            # Keep heartbeat going — don't refresh UI to avoid resetting user selections
+                    files = None
+            # Smart refresh: update UI incrementally if user is not busy
+            if files and not self._ui_busy:
+                self.root.after(0, lambda: self._smart_refresh(files))
             self.root.after(0, self.schedule_heartbeat)
         except Exception as e:
             print(f"Heartbeat connection check failed: {e}")
             self.update_status("连接已断开，正在自动重连...")
             self.root.after(0, lambda: self.start_connect_thread(is_auto=True))
+
+    def _smart_refresh(self, new_files):
+        """Incrementally update the file tree while preserving user selections."""
+        # Snapshot current selections before mutation
+        saved_selections = {}
+        for item_id in self.tree.get_children():
+            val = str(self.tree.item(item_id, 'values')[0])
+            filename = val.split(" ", 1)[1] if " " in val else val
+            saved_selections[filename] = val.startswith(self.CHECKED)
+
+        # Build lookup of new files
+        new_map = {}
+        for f in new_files:
+            if f.filename in ['.', '..']:
+                continue
+            new_map[f.filename] = f
+
+        existing_ids = set(self.tree.get_children())
+        new_names = set(new_map.keys())
+
+        # 1. Remove deleted files
+        removed = existing_ids - new_names
+        for name in removed:
+            self.tree.delete(name)
+
+        # 2. Update or add files
+        for name, f in new_map.items():
+            ftype = "文件夹" if f.isDirectory else "文件"
+            size = f"{f.file_size / 1024:.1f} KB" if not f.isDirectory else ""
+            time_str = ""
+            try:
+                if hasattr(f, 'last_write_time') and f.last_write_time:
+                    time_str = datetime.datetime.fromtimestamp(f.last_write_time).strftime('%Y-%m-%d %H:%M:%S')
+            except Exception:
+                pass
+
+            if name in existing_ids:
+                # Update existing item but preserve checkbox state
+                was_checked = saved_selections.get(name, False)
+                prefix = self.CHECKED if was_checked else self.UNCHECKED
+                new_values = (f"{prefix} {name}", size, time_str, ftype)
+                self.tree.item(name, values=new_values)
+            else:
+                # Add new item (not checked)
+                self.tree.insert("", "end", iid=name,
+                                 values=(f"{self.UNCHECKED} {name}", size, time_str, ftype))
+
+        self._is_all_selected = all(
+            str(self.tree.item(i, 'values')[0]).startswith(self.CHECKED)
+            for i in self.tree.get_children()
+        ) if self.tree.get_children() else False
+
+        # Show subtle indicator if anything changed
+        if removed or (new_names - existing_ids):
+            added = len(new_names - existing_ids)
+            removed_count = len(removed)
+            msg_parts = []
+            if added:
+                msg_parts.append(f"新增 {added}")
+            if removed_count:
+                msg_parts.append(f"删除 {removed_count}")
+            if msg_parts:
+                self.update_status(f"目录已更新（{'，'.join(msg_parts)}）")
         
     def on_double_click(self, event):
         item_id = self.tree.focus()
@@ -840,6 +907,7 @@ class SMBBrowserApp:
         if mode == "仅删除":
             if not messagebox.askyesno("确认删除", f"确定要永久删除选中的 {len(files_to_process)} 个文件/文件夹吗？\n此操作不可恢复！"):
                 return
+            self._ui_busy = True
             threading.Thread(target=self.perform_delete_only, args=(files_to_process,), daemon=True).start()
             return
 
@@ -865,11 +933,11 @@ class SMBBrowserApp:
         # 如果只包含一个文件
         if len(files_to_process) == 1:
             filename = files_to_process[0]
-            # No dialog, use target_dir directly
+            self._ui_busy = True
             threading.Thread(target=self.perform_download_single, args=(filename, target_dir, delete_after), daemon=True).start()
         else:
             # 批量操作
-            # No dialog, use target_dir
+            self._ui_busy = True
             threading.Thread(target=self.perform_download_batch, args=(files_to_process, target_dir, delete_after), daemon=True).start()
 
     def perform_delete_only(self, files):
@@ -913,6 +981,7 @@ class SMBBrowserApp:
             self.root.after(0, lambda: messagebox.showwarning("删除报告", report))
         else:
              self.root.after(0, lambda: messagebox.showinfo("成功", f"成功删除 {success_count} 个文件。"))
+        self._ui_busy = False
 
     # --- Favorites Logic ---
     
@@ -925,7 +994,6 @@ class SMBBrowserApp:
         default_name = self.current_path.split('/')[-1] if self.current_path else self.current_share
         
         # Simple input dialog
-        from tkinter import simpledialog
         name = simpledialog.askstring("添加收藏", "请输入收藏文件夹名称:", initialvalue=default_name)
         
         if name:
@@ -1018,6 +1086,7 @@ class SMBBrowserApp:
         except Exception as e:
             self.show_error("操作错误", str(e))
             self.update_status("操作失败")
+        self._ui_busy = False
 
     def download_directory_recursive(self, share, remote_path, local_path):
         if not os.path.exists(local_path):
@@ -1119,6 +1188,7 @@ class SMBBrowserApp:
             report += "\n\n错误详情 (前5个):\n" + "\n".join(errors[:5])
         
         self.root.after(0, lambda: messagebox.showinfo("报告", report))
+        self._ui_busy = False
 
     def on_closing(self):
         self.stop_heartbeat()
@@ -1180,7 +1250,6 @@ if __name__ == "__main__":
     if not _single_instance_socket:
         root = tk.Tk()
         root.withdraw()
-        from tkinter import messagebox
         messagebox.showwarning("运行提示", "软件已经在运行中，请勿重复打开！")
         sys.exit(0)
 
